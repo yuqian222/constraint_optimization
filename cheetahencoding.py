@@ -85,7 +85,7 @@ def finish_episode(myround, my_states):
         if m == 0:
             R = 0
     rewards = torch.tensor(rewards)
-    print (rewards)
+    # print (rewards)
     # rewards = policy.rewards
 
     # rewards = (rewards - rewards.mean()) / (rewards.std() + eps)
@@ -147,7 +147,7 @@ def solveNetwork(my_states, limits, policy_net, firstParam, secondParam, set, pr
         input = chunk_s
         # action = keys[0]
         # print (input)
-        val = 20
+        val = 40
 
         if set == 2:
             val = 65
@@ -273,7 +273,7 @@ def main():
             num_steps += (t-1)
             num_episodes += 1
             reward_batch += reward_sum
-        print ("Numsteps is ", num_steps)
+        # print ("Numsteps is ", num_steps)
         reward_batch /= num_episodes
         finish_episode(num_episodes, my_states)
 
@@ -306,6 +306,7 @@ def main():
 
             if s_actions == 0:
                 print ("No valid constraint")
+                f.close()
                 break
 
             if prob.status == GRB.Status.OPTIMAL:
