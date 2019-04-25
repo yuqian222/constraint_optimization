@@ -290,7 +290,7 @@ def initializeLimits(policy_net, limits, prob):
     for neuron_idx in range(policy_net.affine1.weight.size(0)):
         for prev_neuron_idx in range(policy_net.affine1.weight.size(1)): #4
             coeff = "x" + str(neuron_idx) +"_"+ str(prev_neuron_idx)
-            var = prob.addVar(lb=-10, ub=10, vtype=GRB.CONTINUOUS)
+            var = prob.addVar(lb=-1, ub=1, vtype=GRB.CONTINUOUS)
             # prob.addConstr(var <= 500)
             # prob.addConstr(var >= -500)
 

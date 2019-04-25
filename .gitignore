@@ -1,0 +1,5 @@
+*.DS_Store
+results/*
+baseline_policy.py
+gurobi.log
+filewk.lp
