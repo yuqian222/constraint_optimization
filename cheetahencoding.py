@@ -8,7 +8,6 @@ import torch.nn as nn
 import torch as F
 import torch.optim as optim
 from torch.distributions import Categorical, Bernoulli
-import matplotlib.pyplot as plt
 from gurobipy import *
 
 
@@ -27,9 +26,8 @@ args = parser.parse_args()
 INIT_WEIGHT = False
 VAR_BOUND = 1.0
 SLACK_BOUND = 0.5
-TOP_N_CONSTRIANTS = 35
-VARIANCE = 0.2
-
+TOP_N_CONSTRIANTS = 30
+VARIANCE = 0.3
 
 env = gym.make('HalfCheetah-v2')
 env.seed(args.seed)
@@ -176,6 +174,7 @@ def solveNetwork(my_states, limits, policy_net, firstParam, firstBias, prob, f):
     obj = 0
     for e in slack_vars:
         obj += e*e #abs value
+        # add a l1 norm???
 
     prob.setObjective(obj, GRB.MINIMIZE)
 
@@ -233,6 +232,7 @@ def initializeLimits(policy_net, limits, prob):
 
 
 def main():
+    my_policies = {}
     my_states = {}
     initLimits = []
     timestr = strftime("%m_%d_%H_%M", gmtime())
@@ -300,13 +300,15 @@ def main():
 
         # if i_episode % args.log_interval == 0:
         if (1==1):
-            print('Episode {}\tEval reward: {:.2f}\tExplore reward {:.2f}'.format(
+            print('Episode {}\tEval reward: {:.2f}\tExplore reward: {:.2f}'.format(
                 i_episode, eval_rew, explore_rew))
-            f.write('Episode {}\tAverage epLen: {}\tAverage reward {:.2f}'.format(
+            f.write('Episode {}\tEval reward: {:.2f}\tAverage reward: {:.2f}'.format(
                 i_episode, eval_rew, explore_rew))
             f.write('\n')
 
-        if i_episode == 100:
+        if i_episode == 600:
+            with open("results/policy_"+timestr,'wb') as pfile:
+                pickle.dump({'policy':policy, 'my_states':my_states} ,pfile)
             f.close()
             break
 
