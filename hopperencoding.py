@@ -23,20 +23,20 @@ parser.add_argument('--log-interval', type=int, default=10, metavar='N',
 args = parser.parse_args()
 
 #GLOBAL VARIABLES
-INIT_WEIGHT = True
-VAR_BOUND = 1.0
-SLACK_BOUND = 0.5
-TOP_N_CONSTRIANTS = 30
-VARIANCE = 0.3
+INIT_WEIGHT = False
+VAR_BOUND = 2.0
+SLACK_BOUND = 0.4
+TOP_N_CONSTRIANTS = 15
+VARIANCE = 0.2
 
-env = gym.make('HalfCheetah-v2')
+env = gym.make('Hopper-v2')
 env.seed(args.seed)
 torch.manual_seed(args.seed)
 
 class Policy(nn.Module):
     def __init__(self):
         super(Policy, self).__init__()
-        self.affine1 = nn.Linear(17, 6)
+        self.affine1 = nn.Linear(11, 3)
 
         self.saved_action = []
         self.saved_state = []
@@ -130,7 +130,6 @@ def bestStates(my_states, top_n_constraints=-1):
     # Get metadata of values
     vals = list(max_vals_dict.values())
     print("Max values mean: %.3f  std: %.3f  max: %.3f" % (np.mean(vals), np.std(vals), max(vals)))
-
 
     if top_n_constraints > 0:
         top_n = nlargest(top_n_constraints, max_act_dict.keys(), key=lambda s: max_vals_dict[s])
@@ -245,7 +244,7 @@ def main():
     initLimits = []
     timestr = strftime("%m_%d_%H_%M", gmtime())
     prob = Model("mip1")
-    f = open("results/"+timestr+".txt", "w")
+    f = open("results/hopper_"+timestr+".txt", "w")
 
 
     (firstParam, firstBias) = initializeLimits(policy, initLimits, prob)
@@ -265,9 +264,9 @@ def main():
                 next_state, reward, done, _ = env.step(action)
                 eval_rew += reward
                 if done:
-                    policy.rewards.append((reward, t))
+                    policy.rewards.append((reward, 0))
                 else:
-                    policy.rewards.append((reward, t))
+                    policy.rewards.append((reward, 1))
                 if args.render:
                     env.render()
                 if done:
