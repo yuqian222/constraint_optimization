@@ -23,20 +23,22 @@ parser.add_argument('--log-interval', type=int, default=10, metavar='N',
 args = parser.parse_args()
 
 #GLOBAL VARIABLES
-INIT_WEIGHT = False
+INIT_WEIGHT = True
 VAR_BOUND = 1.0
-SLACK_BOUND = 0.5
+SLACK_BOUND = 0.2
 TOP_N_CONSTRIANTS = 30
-VARIANCE = 0.3
+VARIANCE = 0.1
+BRANCHES = 5
+NOVELTY_SLACK = 50
 
-env = gym.make('HalfCheetah-v2')
+env = gym.make('Hopper-v2')
 env.seed(args.seed)
 torch.manual_seed(args.seed)
 
 class Policy(nn.Module):
     def __init__(self):
         super(Policy, self).__init__()
-        self.affine1 = nn.Linear(17, 6)
+        self.affine1 = nn.Linear(11, 3)
 
         self.saved_action = []
         self.saved_state = []
@@ -55,15 +57,8 @@ class Policy(nn.Module):
         action_scores = self.affine1(x)
         return action_scores
 
-policy = Policy()
 
-if INIT_WEIGHT:
-    with open("save_1000.p",'rb') as f:
-        params=pickle.load(f)
-        policy.init_weight(params)
-
-
-def select_action(state, variance=0.1):
+def select_action(state, policy, variance=0.1):
 
     new_state = torch.from_numpy(state).unsqueeze(0)
     action = policy(new_state.float())
@@ -80,20 +75,17 @@ def select_action(state, variance=0.1):
     return action
 
 
-def finish_episode(myround, my_states):
+def finish_episode(myround, policy, my_states):
     print ("finish_episode")
     R = 0
     rewards = []
     # calculate reward from the terminal state (add discount factor)
-    '''
-    # diminishing rewards
+
     for (r,step,name) in policy.rewards[::-1]:
         R = r + args.gamma * R
         rewards.insert(0, (R,step,name))
         if step == 0:
             R = 0
-    '''
-    rewards = policy.rewards
     # update the state_reward dictionary
     for i in range(len(policy.saved_state)):
         chunk_state = policy.saved_state[i]
@@ -113,10 +105,16 @@ def finish_episode(myround, my_states):
     del policy.saved_state[:]
     del policy.saved_action[:]
     del policy.rewards[:]
+    return my_states
+
+
+    print("len of mystates is ")
+    print(len(my_states))
+
+    return my_states
 
 
 def bestStates(my_states, top_n_constraints=-1): 
-
     max_act_dict = {}
     max_vals_dict = {}
 
@@ -146,7 +144,7 @@ def bestStates(my_states, top_n_constraints=-1):
     return top_n_dict
 
 
-def solveNetwork(my_states, limits, policy_net, firstParam, firstBias, prob, f):
+def solveNetwork(my_states, limits, policy_net, firstParam, firstBias, prob):
     currLimits = limits
     formulas = []
     s_actions = 0
@@ -184,11 +182,9 @@ def solveNetwork(my_states, limits, policy_net, firstParam, firstBias, prob, f):
     prob.setObjective(obj, GRB.MINIMIZE)
 
     print ("Number of constraints are ", count)
-    f.write('\nNumber of constraints are {}\t\n'.format(count))
 
     if (count == 0):
         return (prob, 0)
-
     prob.optimize()
     prob.write("filewk.lp")
     return (prob, 1)
@@ -230,112 +226,119 @@ def initializeLimits(policy_net, limits, prob):
 
     return firstParam, firstBias
 
+def solvePolicy(my_states, limits, policy, firstParam, firstBias, prob):
+    print ("Length of mystate dictionary is" , len(my_states))
+
+    my_states = bestStates(my_states, top_n_constraints=TOP_N_CONSTRIANTS) #only keep the best states
+    (result, s_actions) = solveNetwork(my_states, limits, policy, firstParam, firstBias, prob)
+
+    if s_actions == 0:
+        print ("No valid constraint")
+        return 1
+    if prob.status == GRB.Status.OPTIMAL:
+        print ("update Param using solved solution")
+        return 0
+    if prob.status == GRB.Status.INF_OR_UNBD:
+        print ("Infeasible or unbounded")
+        return 1
+    if prob.status == GRB.Status.INFEASIBLE:
+        print('Optimization was stopped with status %d' % prob.status)
+        print ("Infeasible!!!")
+        return 1
+    return 2 #what can happen here?
 
 def main():
-    my_policies = {}
-    my_states = {}
+    global VARIANCE
+    global SLACK_BOUND
+    sample_policy, sample_eval = Policy(), float("-inf")
+    
+    if INIT_WEIGHT:
+        with open("save_1000.p",'rb') as f:
+            params=pickle.load(f)
+            sample_policy.init_weight(params)
+
+    my_policies = []
     initLimits = []
     timestr = strftime("%m_%d_%H_%M", gmtime())
     prob = Model("mip1")
     f = open("results/"+timestr+".txt", "w")
 
-
-    (firstParam, firstBias) = initializeLimits(policy, initLimits, prob)
+    (firstParam, firstBias) = initializeLimits(sample_policy, initLimits, prob)
 
     for i_episode in count(1):
+        if i_episode > 50:
+            VARIANCE = 0.1
+            SLACK_BOUND = 0.2
+        max_policy, max_eval = sample_policy, float("-inf")
+        for branch in range(BRANCHES):
 
-        num_steps = 0
-        eval_episodes = 0
-        eval_rew = 0
+            # Exploration
+            num_steps = 0
+            explore_episodes = 0
+            explore_rew =0
+            branch_policy = Policy()
+            branch_state_dict = {}
+            while num_steps < 10000:
+                state = env.reset()
+                for t in range(10000): # Don't infinite loop while learning
+                    action = select_action(state, sample_policy, variance=VARIANCE)
+                    next_state, reward, done, _ = env.step(action)
+                    explore_rew += reward
+                    sample_policy.rewards.append((reward, t, "%d_expl_%d"%(i_episode, explore_episodes)))
+                    if args.render:
+                        env.render()
+                    if done:
+                        break
+                    state = next_state
+                num_steps += (t-1)
+                explore_episodes += 1
+            
+            explore_rew /= explore_episodes
+            branch_state_dict = finish_episode(explore_episodes, sample_policy, branch_state_dict)
 
-        #Evaluation
-        while num_steps < 15000:
-            state = env.reset()
-            eval_sum = 0
-            for t in range(10000): # Don't infinite loop while learning
-                action = select_action(state, variance=0)
-                state, reward, done, _ = env.step(action)
-                eval_rew += reward
-                policy.rewards.append((reward, t, "%d_eval_%d"%(i_episode, eval_episodes)))
-                if args.render:
-                    env.render()
-                if done:
-                    break
-            num_steps += (t-1)
-            eval_episodes += 1
-        
-        eval_rew /= eval_episodes
+            # Solve
+            exit = solvePolicy(branch_state_dict, initLimits, branch_policy, firstParam, firstBias, prob)
+            if exit == 0:
+                updateParam(prob, branch_policy)
+            elif exit == 2:
+                print("Error: unhandled solvePolicy case here")
+            prob = Model("mip1")
+            (firstParam, firstBias) = initializeLimits(branch_policy, initLimits, prob)
 
-        num_steps = 0
-        explore_episodes = 0
-        explore_rew =0
+            # Evaluate
+            num_steps = 0
+            eval_episodes = 0
+            eval_rew = 0
+            while num_steps < 10000:
+                state = env.reset()
+                eval_sum = 0
+                for t in range(10000): # Don't infinite loop while learning
+                    action = select_action(state, branch_policy, variance=0)
+                    state, reward, done, _ = env.step(action)
+                    eval_rew += reward
+                    branch_policy.rewards.append((reward, t, "%d_eval_%d"%(i_episode, eval_episodes)))
+                    if args.render:
+                        env.render()
+                    if done:
+                        break
+                num_steps += (t-1)
+                eval_episodes += 1
+            eval_rew /= eval_episodes
 
-        #exploration
-        while num_steps < 15000:
-            state = env.reset()
-            for t in range(10000): # Don't infinite loop while learning
-                action = select_action(state, variance=VARIANCE)
-
-                next_state, reward, done, _ = env.step(action)
-                explore_rew += reward
-                policy.rewards.append((reward, t, "%d_expl_%d"%(i_episode, explore_episodes)))
-                if args.render:
-                    env.render()
-                if done:
-                    break
-                state = next_state
-            num_steps += (t-1)
-            explore_episodes += 1
-        
-        explore_rew /= explore_episodes
-
-        finish_episode(eval_episodes+explore_episodes, my_states)
-
-        # if i_episode % args.log_interval == 0:
-        if (1==1):
-            print('Episode {}\tEval reward: {:.2f}\tExplore reward: {:.2f}'.format(
-                i_episode, eval_rew, explore_rew))
-            f.write('Episode {}\tEval reward: {:.2f}\tAverage reward: {:.2f}'.format(
-                i_episode, eval_rew, explore_rew))
+            #log
+            print('Episode {}\tBranch: {}\tEval reward: {:.2f}\tExplore reward: {:.2f}\tave Len:{:.2f}'.format(
+                i_episode, branch, eval_rew, explore_rew, num_steps/float(eval_episodes)))
+            f.write('Episode {}\tBranch: {}\tEval reward: {:.2f}\tAverage reward: {:.2f}'.format(
+                i_episode, branch, eval_rew, explore_rew))
             f.write('\n')
 
-        if i_episode == 600:
-            with open("results/policy_"+timestr,'wb') as pfile:
-                pickle.dump({'policy':policy, 'my_states':my_states} ,pfile)
-            f.close()
-            break
+            if eval_rew > max_eval:
+                max_eval, max_policy = eval_rew, branch_policy
 
-        if i_episode > 0 and i_episode % 2 == 0:
-            print ("Length of mystate dictionary is" , len(my_states))
-            # print len(initLimits)
-            limits = initLimits
+        # the end of branching
+        if max_eval > sample_eval - NOVELTY_SLACK:
+            sample_policy, sample_eval = max_policy, max_eval
 
-            my_states = bestStates(my_states, top_n_constraints=TOP_N_CONSTRIANTS) #only keep the best states
-            (result, s_actions) = solveNetwork(my_states, limits, policy, firstParam, firstBias, prob,f)
-
-            if s_actions == 0:
-                print ("No valid constraint")
-                f.close()
-                break
-
-            if prob.status == GRB.Status.OPTIMAL:
-                print ("update Param using solved solution")
-                updateParam(prob, policy)
-                prob = Model("mip1")
-                (firstParam, firstBias) = initializeLimits(policy, initLimits, prob)
-
-
-            elif prob.status == GRB.Status.INF_OR_UNBD:
-                # prob.setParam(GRB.Param.Presolve, 0)
-                # prob.optimize()
-                print ("Infeasible or unbounded")
-                break
-            elif prob.status == GRB.Status.INFEASIBLE:
-                print('Optimization was stopped with status %d' % prob.status)
-                print ("Infeasible!!!")
-                break
-
-            #my_states = {}
 
 if __name__ == '__main__':
     main()

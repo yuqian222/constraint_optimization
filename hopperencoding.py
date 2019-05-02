@@ -12,7 +12,7 @@ from gurobipy import *
 
 
 parser = argparse.ArgumentParser(description='PyTorch REINFORCE example')
-parser.add_argument('--gamma', type=float, default=0.99, metavar='G',
+parser.add_argument('--gamma', type=float, default=0.9, metavar='G',
                     help='discount factor (default: 0.99)')
 parser.add_argument('--seed', type=int, default=543, metavar='N',
                     help='random seed (default: 543)')
@@ -220,6 +220,7 @@ def updateParam(prob, policy_net):
             indices += 1
 
 
+
 def initializeLimits(policy_net, limits, prob):
     firstParam = {}
     firstBias = [None]*policy_net.affine1.bias.size(0)
@@ -264,9 +265,9 @@ def main():
                 next_state, reward, done, _ = env.step(action)
                 eval_rew += reward
                 if done:
-                    policy.rewards.append((reward, 0))
+                    policy.rewards.append((reward, t))
                 else:
-                    policy.rewards.append((reward, 1))
+                    policy.rewards.append((reward, t))
                 if args.render:
                     env.render()
                 if done:
@@ -290,9 +291,9 @@ def main():
                 next_state, reward, done, _ = env.step(action)
                 explore_rew += reward
                 if done:
-                    policy.rewards.append((reward, 0))
+                    policy.rewards.append((reward, t))
                 else:
-                    policy.rewards.append((reward, 1))
+                    policy.rewards.append((reward, t))
                 if args.render:
                     env.render()
                 if done:
@@ -321,7 +322,6 @@ def main():
 
         if i_episode > 0 and i_episode % 2 == 0:
             print ("Length of mystate dictionary is" , len(my_states))
-            # print len(initLimits)
             limits = initLimits
 
             my_states = bestStates(my_states, top_n_constraints=TOP_N_CONSTRIANTS) #only keep the best states
