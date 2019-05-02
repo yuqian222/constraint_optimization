@@ -1,4 +1,4 @@
-import argparse, gym, copy, math, pickle, torch
+import argparse, gym, copy, math, pickle, torch, random
 import numpy as np
 from itertools import count
 from heapq import nlargest
@@ -25,11 +25,12 @@ args = parser.parse_args()
 #GLOBAL VARIABLES
 INIT_WEIGHT = True
 VAR_BOUND = 1.0
-SLACK_BOUND = 0.05
-TOP_N_CONSTRIANTS = 18
-VARIANCE = 0.05
-BRANCHES = 5
-NOVELTY_SLACK = 50
+SLACK_BOUND = 0.02
+TOP_N_CONSTRIANTS = 100
+N_SAMPLES = 19
+VARIANCE = 0.01
+BRANCHES = 50
+NOVELTY_SLACK = 0
 
 env = gym.make('HalfCheetah-v2')
 env.seed(args.seed)
@@ -110,10 +111,6 @@ def finish_episode(myround, policy, my_states):
     return my_states
 
 
-    print("len of mystates is ")
-    print(len(my_states))
-
-    return my_states
 
 
 def bestStates(my_states, top_n_constraints=-1): 
@@ -135,14 +132,14 @@ def bestStates(my_states, top_n_constraints=-1):
         top_n_dict = {k: v for k, v in my_states.items() if k in top_n}
     else:
         top_n_dict= my_states
-
+    '''
     # Get metadata of constraints
     constraint_info = list(top_n_dict.values())
     vals = [list(v.values())[0][0] for v in constraint_info]
     print("constraint mean: %.3f  std: %.3f  max: %.3f" % (np.mean(vals), np.std(vals), max(vals)))
     print("constraint set's episode and step number:")
     print([list(v.values())[0][1:] for v in constraint_info])
-
+    '''
     return top_n_dict
 
 
@@ -228,11 +225,10 @@ def initializeLimits(policy_net, limits, prob):
 
     return firstParam, firstBias
 
-def solvePolicy(my_states, limits, policy, firstParam, firstBias, prob):
-    print ("Length of mystate dictionary is" , len(my_states))
+def solvePolicy(constraints, limits, policy, firstParam, firstBias, prob):
+    print ("Length of mystate dictionary is" , len(constraints))
 
-    my_states = bestStates(my_states, top_n_constraints=TOP_N_CONSTRIANTS) #only keep the best states
-    (result, s_actions) = solveNetwork(my_states, limits, policy, firstParam, firstBias, prob)
+    (result, s_actions) = solveNetwork(constraints, limits, policy, firstParam, firstBias, prob)
 
     if s_actions == 0:
         print ("No valid constraint")
@@ -252,7 +248,7 @@ def solvePolicy(my_states, limits, policy, firstParam, firstBias, prob):
 def main():
     global VARIANCE
     global SLACK_BOUND
-    sample_policy, sample_eval = Policy(), float("-inf")
+    sample_policy, sample_eval = Policy(), 1200#float("-inf")
     
     if INIT_WEIGHT:
         with open("save_1000.p",'rb') as f:
@@ -268,42 +264,52 @@ def main():
     (firstParam, firstBias) = initializeLimits(sample_policy, initLimits, prob)
 
     for i_episode in count(1):
-        if i_episode > 50:
-            VARIANCE = 0.05
-            SLACK_BOUND = 0.1
-        max_policy, max_eval = sample_policy, float("-inf")
+        # Exploration
+        num_steps = 0
+        explore_episodes = 0
+        explore_rew =0
+        my_states = {}
+        while num_steps < 25000:
+            state = env.reset()
+            for t in range(10000): # Don't infinite loop while learning
+                if num_steps < 20000:
+                    action = select_action(state, sample_policy, variance=VARIANCE)
+                    name_str = "expl" #explore
+                else: 
+                    action = select_action(state, sample_policy, variance=0) # 20% randomly good
+                    name_str = "eval" #exploit
+
+                next_state, reward, done, _ = env.step(action)
+                explore_rew += reward
+                sample_policy.rewards.append((reward, t, "%s_%d"%(name_str, explore_episodes)))
+                if args.render:
+                    env.render()
+                if done:
+                    break
+                state = next_state
+            num_steps += (t-1)
+            explore_episodes += 1
+        
+        explore_rew /= explore_episodes
+        my_states = finish_episode(explore_episodes, sample_policy, my_states)
+
+
+        constraints_dict = bestStates(my_states, top_n_constraints=TOP_N_CONSTRIANTS) #only keep the best states
+        max_policy, max_eval = sample_policy, sample_eval
         for branch in range(BRANCHES):
-
-            # Exploration
-            num_steps = 0
-            explore_episodes = 0
-            explore_rew =0
             branch_policy = Policy()
-            branch_state_dict = {}
-            while num_steps < 12000:
-                state = env.reset()
-                for t in range(10000): # Don't infinite loop while learning
-                    if num_steps < 9000:
-                        action = select_action(state, sample_policy, variance=VARIANCE)
-                    else: 
-                        action = select_action(state, sample_policy, variance=0) #randomly good
+            constraints = dict(random.sample(constraints_dict.items(), N_SAMPLES))
 
-                    next_state, reward, done, _ = env.step(action)
-                    explore_rew += reward
-                    sample_policy.rewards.append((reward, t, "%d_expl_%d"%(i_episode, explore_episodes)))
-                    if args.render:
-                        env.render()
-                    if done:
-                        break
-                    state = next_state
-                num_steps += (t-1)
-                explore_episodes += 1
-            
-            explore_rew /= explore_episodes
-            branch_state_dict = finish_episode(explore_episodes, sample_policy, branch_state_dict)
+            # Get metadata of constraints
+            constraint_info = list(constraints.values())
+            vals = [list(v.values())[0][0] for v in constraint_info]
+            print("constraint mean: %.3f  std: %.3f  max: %.3f" % (np.mean(vals), np.std(vals), max(vals)))
+            print("constraint set's episode and step number:")
+            print([list(v.values())[0][1:] for v in constraint_info])
 
             # Solve
-            exit = solvePolicy(branch_state_dict, initLimits, branch_policy, firstParam, firstBias, prob)
+            exit = solvePolicy(constraints, initLimits, branch_policy, firstParam, firstBias, prob)
+            
             if exit == 0:
                 updateParam(prob, branch_policy)
             elif exit == 2:
@@ -315,7 +321,7 @@ def main():
             num_steps = 0
             eval_episodes = 0
             eval_rew = 0
-            while num_steps < 10000:
+            while num_steps < 6000:
                 state = env.reset()
                 eval_sum = 0
                 for t in range(10000): # Don't infinite loop while learning
