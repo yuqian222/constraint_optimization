@@ -5,14 +5,16 @@ from heapq import nlargest
 from time import gmtime, strftime
 from operator import itemgetter
 import torch.nn as nn
-import torch.nn.functional as F
+import torch as F
 import torch.optim as optim
+from torch.utils.data import Dataset,DataLoader
+from torch.autograd import Variable
 from torch.distributions import Categorical, Bernoulli
 from gurobipy import *
 
 
 parser = argparse.ArgumentParser(description='PyTorch REINFORCE example')
-parser.add_argument('--gamma', type=float, default=0.99, metavar='G',
+parser.add_argument('--gamma', type=float, default=0.9, metavar='G',
                     help='discount factor (default: 0.99)')
 parser.add_argument('--seed', type=int, default=543, metavar='N',
                     help='random seed (default: 543)')
@@ -23,24 +25,21 @@ parser.add_argument('--log-interval', type=int, default=10, metavar='N',
 args = parser.parse_args()
 
 #GLOBAL VARIABLES
-INIT_WEIGHT = True
+INIT_WEIGHT = False
+CUMULATIVE = True
+PRINT_RESULTS = False
 VAR_BOUND = 1.0
-SLACK_BOUND = 0.02
+SLACK_BOUND = 0.1
 TOP_N_CONSTRIANTS = 100
 N_SAMPLES = 19
-VARIANCE = 0.01
-BRANCHES = 50
+VARIANCE = 0.1
+BRANCHES = 10
 NOVELTY_SLACK = 0
-CUMULATIVE = True
-
-env = gym.make('HalfCheetah-v2')
-env.seed(args.seed)
-torch.manual_seed(args.seed)
 
 class Policy(nn.Module):
-    def __init__(self):
+    def __init__(self, num_inputs, num_outputs):
         super(Policy, self).__init__()
-        self.affine1 = nn.Linear(17, 6)
+        self.affine1 = nn.Linear(num_inputs, num_outputs)
 
         self.saved_action = []
         self.saved_state = []
@@ -59,6 +58,17 @@ class Policy(nn.Module):
         action_scores = self.affine1(x)
         return action_scores
 
+class value_dataset(Dataset):
+    def __init__(self, x, y):
+        self.x = Variable(torch.Tensor(x))
+        self.y = Variable(torch.Tensor(y))
+        assert(len(x) == len(y))
+    def  __len__(self):
+        return self.x.shape[0]
+    def __getitem__(self, idx):
+        return {"x": self.x[idx], "y": self.y[idx]}
+
+
 class Value(nn.Module):
     def __init__(self, num_inputs):
         super(Value, self).__init__()
@@ -68,11 +78,30 @@ class Value(nn.Module):
         self.value_head.weight.data.mul_(0.1)
         self.value_head.bias.data.mul_(0.0)
 
+
+        self.optimizer = optim.RMSprop(self.parameters())
+        self.criterion = nn.MSELoss()
+
     def forward(self, x):
         x = torch.tanh(self.affine1(x))
         x = torch.tanh(self.affine2(x))
         state_values = self.value_head(x)
         return state_values
+
+    def train(self, x, y, batch_size = 5, epoch = 3):
+        training_set = value_dataset(x, y)
+        training_generator = DataLoader(training_set,  batch_size= batch_size, shuffle=True)
+        for epoch in range(epoch):
+            running_loss = 0
+            for data in training_generator:
+                pred = self.forward(data["x"])
+                loss = self.criterion(pred, data["y"])
+                loss.backward()
+                self.optimizer.step()
+                running_loss += loss.item()
+            print("value trianing: epoch %d, loss = %.3f" %(epoch, running_loss))
+
+
 
 def select_action(state, policy, variance=0.1, record=True):
 
@@ -91,26 +120,31 @@ def select_action(state, policy, variance=0.1, record=True):
     return action
 
 
-def finish_episode(myround, policy, my_states):
-    print ("finish_episode")
+
+def calculate_rewards(myround, policy):
     R = 0
     rewards = []
-    # calculate reward from the terminal state (add discount factor)
-
+    info = []
     if CUMULATIVE:
         for (r,step,name) in policy.rewards[::-1]:
             R = r + args.gamma * R
-            rewards.insert(0, (R,step,name))
+            rewards.insert(0, R)
+            info.insert(0, (step,name))
             if step == 0:
                 R = 0
     else:
         rewards = policy.rewards
+    return policy.saved_state, rewards, info
+
+
+def create_state_dict(policy, rewards, info, my_states):
     # update the state_reward dictionary
     for i in range(len(policy.saved_state)):
         chunk_state = policy.saved_state[i]
         action = policy.saved_action[i]
         action = tuple(action)
-        r,step,name = rewards[i]
+        r = rewards[i]
+        step,name = info[i]
         if chunk_state in my_states:
             if (action in my_states[chunk_state]):
                 # print ("duplicate")
@@ -140,8 +174,8 @@ def bestStates(my_states, top_n_constraints=-1):
 
     # Get metadata of values
     vals = list(max_vals_dict.values())
-    print("Max values mean: %.3f  std: %.3f  max: %.3f" % (np.mean(vals), np.std(vals), max(vals)))
 
+    print("Max values mean: %.3f  std: %.3f  max: %.3f" % (np.mean(vals), np.std(vals), max(vals)))
 
     if top_n_constraints > 0:
         top_n = nlargest(top_n_constraints, max_act_dict.keys(), key=lambda s: max_vals_dict[s])
@@ -212,9 +246,9 @@ def updateParam(prob, policy_net):
     for v in prob.getVars():
         result.append(v.x)
         result_name.append(v.varName)
-
-    print(policy_net.affine1.weight)
-    print(result)
+    if PRINT_RESULTS:
+        print(policy_net.affine1.weight)
+        print(result)
 
     indices = 0
     for neuron_idx in range(policy_net.affine1.weight.size(0)):
@@ -262,11 +296,18 @@ def solvePolicy(constraints, limits, policy, firstParam, firstBias, prob):
     return 2 #what can happen here?
 
 def main():
-    sample_policy, sample_eval = Policy(), float("-inf") #1200
-    value_net = ValueFunction()
-    optimizer = optim.RMSprop(v_functin.parameters())
+
+    env = gym.make('HalfCheetah-v2')
+    env.seed(args.seed)
+    torch.manual_seed(args.seed)
+
+    value_net = Value(env.observation_space.shape[0])
+
+  
+    sample_policy, sample_eval = Policy(env.observation_space.shape[0], env.action_space.shape[0]), float("-inf")
     
     if INIT_WEIGHT:
+        sample_eval = 1300
         with open("save_1000.p",'rb') as f:
             params=pickle.load(f)
             sample_policy.init_weight(params)
@@ -285,7 +326,7 @@ def main():
         explore_episodes = 0
         explore_rew =0
         my_states = {}
-        while num_steps < 25000:
+        while num_steps < 10000:
             state = env.reset()
             for t in range(10000): # Don't infinite loop while learning
                 if num_steps < 20000:
@@ -307,20 +348,20 @@ def main():
             explore_episodes += 1
         
         explore_rew /= explore_episodes
-        my_states = finish_episode(explore_episodes, sample_policy, my_states)
 
-        #train value network
-        loss = nn.MSELoss()
-        pred = Value()
-        target = torch.randn(3, 5)
-        output = loss(input, target)
-        output.backward()
+        states, rewards, info = calculate_rewards(explore_episodes, sample_policy)
+        values = value_net(torch.Tensor(states))
+        advantages = np.subtract(np.array(rewards), values.detach().numpy().flatten())
+        value_net.train(states, rewards)
 
-        # sample constraints and solve policies
+        my_states = create_state_dict(sample_policy, advantages, info, my_states)
+
+        # sample and solve
         constraints_dict = bestStates(my_states, top_n_constraints=TOP_N_CONSTRIANTS) #only keep the best states
         max_policy, max_eval = sample_policy, sample_eval
+        
         for branch in range(BRANCHES):
-            branch_policy = Policy()
+            branch_policy = Policy(env.observation_space.shape[0], env.action_space.shape[0])
             constraints = dict(random.sample(constraints_dict.items(), N_SAMPLES))
 
             # Get metadata of constraints
@@ -337,6 +378,7 @@ def main():
                 updateParam(prob, branch_policy)
             elif exit == 2:
                 print("Error: unhandled solvePolicy case here")
+            
             prob = Model("mip1")
             (firstParam, firstBias) = initializeLimits(branch_policy, initLimits, prob)
 
@@ -348,9 +390,11 @@ def main():
                 state = env.reset()
                 eval_sum = 0
                 for t in range(10000): # Don't infinite loop while learning
-                    action = select_action(state, branch_policy, variance=0, record=False)
+                    action = select_action(state, branch_policy, variance=0)
                     state, reward, done, _ = env.step(action)
                     eval_rew += reward
+                    branch_policy.rewards.append((reward, t, "%s_%d"%(name_str, explore_episodes)))
+
                     if args.render:
                         env.render()
                     if done:
@@ -358,6 +402,9 @@ def main():
                 num_steps += (t-1)
                 eval_episodes += 1
             eval_rew /= eval_episodes
+
+            states, rewards, _ = calculate_rewards(eval_episodes, branch_policy)
+            value_net.train(states, rewards)
 
             #log
             print('Episode {}\tBranch: {}\tEval reward: {:.2f}\tExplore reward: {:.2f}'.format(
