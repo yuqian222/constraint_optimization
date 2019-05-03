@@ -378,6 +378,9 @@ def main():
                 updateParam(prob, branch_policy)
             elif exit == 2:
                 print("Error: unhandled solvePolicy case here")
+                continue
+            elif exit == 1:
+                continue
             
             prob = Model("mip1")
             (firstParam, firstBias) = initializeLimits(branch_policy, initLimits, prob)
