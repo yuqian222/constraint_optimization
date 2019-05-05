@@ -25,19 +25,19 @@ parser.add_argument('--log-interval', type=int, default=10, metavar='N',
 args = parser.parse_args()
 
 #GLOBAL VARIABLES
-INIT_WEIGHT = False
+INIT_WEIGHT = True
 CUMULATIVE = True
 PRINT_RESULTS = False
 VAR_BOUND = 1.0
-SLACK_BOUND = 0.1
-TOP_N_CONSTRIANTS = 100
+SLACK_BOUND = 0.005
+TOP_N_CONSTRIANTS = 30
 N_SAMPLES = 19
-VARIANCE = 0.1
+VARIANCE = 0.01
 BRANCHES = 10
 NOVELTY_SLACK = 0
 
 class Policy(nn.Module):
-    def __init__(self, num_inputs, num_outputs):
+    def __init__(self, num_inputs, num_outputs, initialize = True):
         super(Policy, self).__init__()
         self.affine1 = nn.Linear(num_inputs, num_outputs)
 
@@ -52,6 +52,7 @@ class Policy(nn.Module):
             self.affine1.bias.data[neuron_idx] = dic[("bias",neuron_idx)]
             for prev_neuron_idx in range(self.affine1.weight.size(1)):
                 self.affine1.weight.data[neuron_idx][prev_neuron_idx] = dic[(neuron_idx,prev_neuron_idx)]
+
 
     def forward(self, x):
         # x = F.tanh(self.affine1(x))
@@ -68,7 +69,6 @@ class value_dataset(Dataset):
     def __getitem__(self, idx):
         return {"x": self.x[idx], "y": self.y[idx]}
 
-
 class Value(nn.Module):
     def __init__(self, num_inputs):
         super(Value, self).__init__()
@@ -79,7 +79,7 @@ class Value(nn.Module):
         self.value_head.bias.data.mul_(0.0)
 
 
-        self.optimizer = optim.RMSprop(self.parameters())
+        self.optimizer = optim.Adam(self.parameters())
         self.criterion = nn.MSELoss()
 
     def forward(self, x):
@@ -352,13 +352,15 @@ def main():
         states, rewards, info = calculate_rewards(explore_episodes, sample_policy)
         values = value_net(torch.Tensor(states))
         advantages = np.subtract(np.array(rewards), values.detach().numpy().flatten())
-        value_net.train(states, rewards)
+        value_net.train(states, rewards, epoch = 5)
 
         my_states = create_state_dict(sample_policy, advantages, info, my_states)
 
         # sample and solve
         constraints_dict = bestStates(my_states, top_n_constraints=TOP_N_CONSTRIANTS) #only keep the best states
-        max_policy, max_eval = sample_policy, sample_eval
+        max_policy, max_eval, max_ = sample_policy, sample_eval
+
+        print('\nEpisode {}\tExplore reward: {:.2f}\n'.format(i_episode, explore_rew))
         
         for branch in range(BRANCHES):
             branch_policy = Policy(env.observation_space.shape[0], env.action_space.shape[0])
@@ -367,9 +369,9 @@ def main():
             # Get metadata of constraints
             constraint_info = list(constraints.values())
             vals = [list(v.values())[0][0] for v in constraint_info]
-            print("constraint mean: %.3f  std: %.3f  max: %.3f" % (np.mean(vals), np.std(vals), max(vals)))
+            print("ep %d b %d: constraint mean: %.3f  std: %.3f  max: %.3f" % (i_episode, branch, np.mean(vals), np.std(vals), max(vals)))
             print("constraint set's episode and step number:")
-            print([list(v.values())[0][1:] for v in constraint_info])
+            print([list(v.values())[0] for v in constraint_info])
 
             # Solve
             exit = solvePolicy(constraints, initLimits, branch_policy, firstParam, firstBias, prob)
@@ -378,8 +380,14 @@ def main():
                 updateParam(prob, branch_policy)
             elif exit == 2:
                 print("Error: unhandled solvePolicy case here")
+                print('Episode {}\tBranch: {}\tUnsat'.format(i_episode, branch))
+                print("L2_NORM")
+                print(all_l2_norm(list(constraints.keys())))
                 continue
             elif exit == 1:
+                print('Episode {}\tBranch: {}\tUnsat'.format(i_episode, branch))
+                print("L2_NORM")
+                print(all_l2_norm(list(constraints.keys())))
                 continue
             
             prob = Model("mip1")
@@ -412,8 +420,8 @@ def main():
             #log
             print('Episode {}\tBranch: {}\tEval reward: {:.2f}\tExplore reward: {:.2f}'.format(
                 i_episode, branch, eval_rew, explore_rew))
-            f.write('Episode {}\tBranch: {}\tEval reward: {:.2f}\tExplore reward: {:.2f}'.format(
-                i_episode, branch, eval_rew, explore_rew))
+            f.write('Episode {}\tBranch: {}\tEval reward: {:.2f}'.format(
+                i_episode, branch, eval_rew))
             f.write('\n')
 
             if eval_rew > max_eval:
@@ -422,6 +430,13 @@ def main():
         # the end of branching
         if max_eval > sample_eval - NOVELTY_SLACK:
             sample_policy, sample_eval = max_policy, max_eval
+
+def all_l2_norm(states):
+    all_dist = []
+    for i, x1 in enumerate(states):
+        for x2 in states[i:]:
+            all_dist.append(np.linalg.norm(np.subtract(x1,x2)))
+    return sorted(all_dist)
 
 
 if __name__ == '__main__':
