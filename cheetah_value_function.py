@@ -1,4 +1,4 @@
-import argparse, gym, copy, math, pickle, torch, random
+import argparse, gym, copy, math, pickle, torch, random, json
 import numpy as np
 from itertools import count
 from heapq import nlargest
@@ -29,11 +29,11 @@ INIT_WEIGHT = True
 CUMULATIVE = True
 PRINT_RESULTS = False
 VAR_BOUND = 1.0
-SLACK_BOUND = 0.005
-TOP_N_CONSTRIANTS = 30
-N_SAMPLES = 19
+SLACK_BOUND = 0.01
+TOP_N_CONSTRIANTS = 50
+N_SAMPLES = 18
 VARIANCE = 0.01
-BRANCHES = 10
+BRANCHES = 20
 NOVELTY_SLACK = 0
 
 class Policy(nn.Module):
@@ -52,7 +52,6 @@ class Policy(nn.Module):
             self.affine1.bias.data[neuron_idx] = dic[("bias",neuron_idx)]
             for prev_neuron_idx in range(self.affine1.weight.size(1)):
                 self.affine1.weight.data[neuron_idx][prev_neuron_idx] = dic[(neuron_idx,prev_neuron_idx)]
-
 
     def forward(self, x):
         # x = F.tanh(self.affine1(x))
@@ -94,13 +93,12 @@ class Value(nn.Module):
         for epoch in range(epoch):
             running_loss = 0
             for data in training_generator:
-                pred = self.forward(data["x"])
+                pred = self.forward(data["x"]).squeeze()
                 loss = self.criterion(pred, data["y"])
                 loss.backward()
                 self.optimizer.step()
                 running_loss += loss.item()
             print("value trianing: epoch %d, loss = %.3f" %(epoch, running_loss))
-
 
 
 def select_action(state, policy, variance=0.1, record=True):
@@ -110,12 +108,15 @@ def select_action(state, policy, variance=0.1, record=True):
     action = action.data[0].numpy()
     action = np.random.normal(action, [variance]*len(action))
     chunk_state = []
+    chunk_action = []
     for i in range(len(state)):
         chunk_state.append(round(state[i], 5))
+    for i in range(len(action)):
+        chunk_action.append(round(action[i], 5))
 
-    chunk_state = tuple(chunk_state)
+    chunk_state,chunk_action = tuple(chunk_state),tuple(chunk_action)
     if record:
-        policy.saved_action.append(action)
+        policy.saved_action.append(chunk_action)
         policy.saved_state.append(chunk_state)
     return action
 
@@ -142,12 +143,12 @@ def create_state_dict(policy, rewards, info, my_states):
     for i in range(len(policy.saved_state)):
         chunk_state = policy.saved_state[i]
         action = policy.saved_action[i]
-        action = tuple(action)
         r = rewards[i]
         step,name = info[i]
         if chunk_state in my_states:
+            print("duplicate state")
             if (action in my_states[chunk_state]):
-                # print ("duplicate")
+                print ("duplicate action")
                 my_states[chunk_state][action] = ((r+my_states[chunk_state][action][0])/2,step,name)
             else:
                 my_states[chunk_state][action] = (r,step,name)
@@ -297,12 +298,16 @@ def solvePolicy(constraints, limits, policy, firstParam, firstBias, prob):
 
 def main():
 
+
+    dir_name = "results/"+strftime("%m_%d_%H_%M", gmtime())
+    os.mkdir(dir_name)
+    logfile = open(dir_name+"/log.txt", "w")
+
     env = gym.make('HalfCheetah-v2')
     env.seed(args.seed)
     torch.manual_seed(args.seed)
 
     value_net = Value(env.observation_space.shape[0])
-
   
     sample_policy, sample_eval = Policy(env.observation_space.shape[0], env.action_space.shape[0]), float("-inf")
     
@@ -314,9 +319,7 @@ def main():
 
     my_policies = []
     initLimits = []
-    timestr = strftime("%m_%d_%H_%M", gmtime())
     prob = Model("mip1")
-    f = open("results/"+timestr+".txt", "w")
 
     (firstParam, firstBias) = initializeLimits(sample_policy, initLimits, prob)
 
@@ -352,16 +355,16 @@ def main():
         states, rewards, info = calculate_rewards(explore_episodes, sample_policy)
         values = value_net(torch.Tensor(states))
         advantages = np.subtract(np.array(rewards), values.detach().numpy().flatten())
-        value_net.train(states, rewards, epoch = 5)
+        value_net.train(states, rewards)
 
         my_states = create_state_dict(sample_policy, advantages, info, my_states)
 
         # sample and solve
         constraints_dict = bestStates(my_states, top_n_constraints=TOP_N_CONSTRIANTS) #only keep the best states
-        max_policy, max_eval, max_ = sample_policy, sample_eval
+        max_policy, max_eval, max_set = sample_policy, sample_eval, constraints_dict
 
         print('\nEpisode {}\tExplore reward: {:.2f}\n'.format(i_episode, explore_rew))
-        
+
         for branch in range(BRANCHES):
             branch_policy = Policy(env.observation_space.shape[0], env.action_space.shape[0])
             constraints = dict(random.sample(constraints_dict.items(), N_SAMPLES))
@@ -382,12 +385,12 @@ def main():
                 print("Error: unhandled solvePolicy case here")
                 print('Episode {}\tBranch: {}\tUnsat'.format(i_episode, branch))
                 print("L2_NORM")
-                print(all_l2_norm(list(constraints.keys())))
+                print(all_l2_norm(constraints))
                 continue
             elif exit == 1:
                 print('Episode {}\tBranch: {}\tUnsat'.format(i_episode, branch))
                 print("L2_NORM")
-                print(all_l2_norm(list(constraints.keys())))
+                print(all_l2_norm(constraints))
                 continue
             
             prob = Model("mip1")
@@ -420,22 +423,26 @@ def main():
             #log
             print('Episode {}\tBranch: {}\tEval reward: {:.2f}\tExplore reward: {:.2f}'.format(
                 i_episode, branch, eval_rew, explore_rew))
-            f.write('Episode {}\tBranch: {}\tEval reward: {:.2f}'.format(
-                i_episode, branch, eval_rew))
-            f.write('\n')
+            logfile.write('Episode {}\tBranch: {}\tEval reward: {:.2f}'.format(i_episode, branch, eval_rew))
 
             if eval_rew > max_eval:
-                max_eval, max_policy = eval_rew, branch_policy
+                max_eval, max_policy, max_set = eval_rew, branch_policy, constraints
 
         # the end of branching
         if max_eval > sample_eval - NOVELTY_SLACK:
+            with open("%s/%d.p"%(dir_name,i_episode), "wb") as f:
+                pickle.dump({"all": constraints_dict, "constraints": max_set}, f)
             sample_policy, sample_eval = max_policy, max_eval
 
-def all_l2_norm(states):
+def all_l2_norm(constraints):
+    states = list(constraints.keys())
     all_dist = []
     for i, x1 in enumerate(states):
-        for x2 in states[i:]:
-            all_dist.append(np.linalg.norm(np.subtract(x1,x2)))
+        for x2 in states[i+1:]:
+            d=np.linalg.norm(np.subtract(x1,x2))
+            if d - 0 < 1e-2:
+                print("0 dist at state %s with action %s and %s" %(str(x1), str(list(constraints[x1].keys())[0]),str(list(constraints[x2].keys())[0])))
+            all_dist.append(d)
     return sorted(all_dist)
 
 
