@@ -195,8 +195,7 @@ def bestStates(my_states, top_n_constraints=-1):
     return top_n_dict
 
 
-def solveNetwork(my_states, limits, policy_net, firstParam, firstBias, prob):
-    currLimits = limits
+def solveNetwork(my_states,  policy_net, firstParam, firstBias, prob):
     formulas = []
     s_actions = 0
     count = 0
@@ -263,7 +262,7 @@ def updateParam(prob, policy_net):
             indices += 1
 
 
-def initializeLimits(policy_net, limits, prob):
+def initializeLimits(policy_net, prob):
     firstParam = {}
     firstBias = [None]*policy_net.affine1.bias.size(0)
 
@@ -277,10 +276,10 @@ def initializeLimits(policy_net, limits, prob):
 
     return firstParam, firstBias
 
-def solvePolicy(constraints, limits, policy, firstParam, firstBias, prob):
+def solvePolicy(constraints, policy, firstParam, firstBias, prob):
     print ("Length of mystate dictionary is" , len(constraints))
 
-    (result, s_actions) = solveNetwork(constraints, limits, policy, firstParam, firstBias, prob)
+    (result, s_actions) = solveNetwork(constraints, policy, firstParam, firstBias, prob)
 
     if s_actions == 0:
         print ("No valid constraint")
@@ -311,16 +310,13 @@ def main():
   
     sample_policy, sample_eval = Policy(env.observation_space.shape[0], env.action_space.shape[0]), float("-inf")
     prob = Model("mip1")
-    (firstParam, firstBias) = initializeLimits(sample_policy, initLimits, prob)
+    (firstParam, firstBias) = initializeLimits(sample_policy, prob)
 
     if INIT_WEIGHT:
         sample_eval = 1300
         with open("save_1000.p",'rb') as f:
             params=pickle.load(f)
             sample_policy.init_weight(params)
-
-    my_policies = []
-    initLimits = []
 
 
     for i_episode in count(1):
@@ -367,9 +363,10 @@ def main():
 
         for branch in range(BRANCHES):
             branch_policy = Policy(env.observation_space.shape[0], env.action_space.shape[0])
-            prob = Model("mip1")
-            (firstParam, firstBias) = initializeLimits(sample_policy, initLimits, prob)
             constraints = dict(random.sample(constraints_dict.items(), N_SAMPLES))
+
+            prob = Model("mip1")
+            (firstParam, firstBias) = initializeLimits(branch_policy, prob)
 
             # Get metadata of constraints
             constraint_info = list(constraints.values())
@@ -379,7 +376,7 @@ def main():
             print([list(v.values())[0] for v in constraint_info])
 
             # Solve
-            exit = solvePolicy(constraints, initLimits, branch_policy, firstParam, firstBias, prob)
+            exit = solvePolicy(constraints, branch_policy, firstParam, firstBias, prob)
             
             if exit == 0:
                 updateParam(prob, branch_policy)
@@ -394,9 +391,6 @@ def main():
                 print("L2_NORM")
                 print(all_l2_norm(constraints))
                 continue
-            
-            prob = Model("mip1")
-            (firstParam, firstBias) = initializeLimits(branch_policy, initLimits, prob)
 
             # Evaluate
             num_steps = 0
