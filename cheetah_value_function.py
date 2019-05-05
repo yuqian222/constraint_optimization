@@ -25,7 +25,7 @@ parser.add_argument('--log-interval', type=int, default=10, metavar='N',
 args = parser.parse_args()
 
 #GLOBAL VARIABLES
-INIT_WEIGHT = True
+INIT_WEIGHT = False
 CUMULATIVE = True
 PRINT_RESULTS = False
 VAR_BOUND = 1.0
@@ -41,10 +41,18 @@ class Policy(nn.Module):
         super(Policy, self).__init__()
         self.affine1 = nn.Linear(num_inputs, num_outputs)
 
+        if initialize:
+            self.random_initialize()
+
         self.saved_action = []
         self.saved_state = []
         self.saved_log_probs = []
         self.rewards = []
+
+
+    def random_initialize(self):
+        nn.init.uniform_(self.affine1.weight.data, a=-0.1, b=0.1)
+        nn.init.uniform_(self.affine1.bias.data, 0.0)
 
     def init_weight(self, dic):
 
@@ -107,17 +115,10 @@ def select_action(state, policy, variance=0.1, record=True):
     action = policy(new_state.float())
     action = action.data[0].numpy()
     action = np.random.normal(action, [variance]*len(action))
-    chunk_state = []
-    chunk_action = []
-    for i in range(len(state)):
-        chunk_state.append(round(state[i], 5))
-    for i in range(len(action)):
-        chunk_action.append(round(action[i], 5))
 
-    chunk_state,chunk_action = tuple(chunk_state),tuple(chunk_action)
     if record:
-        policy.saved_action.append(chunk_action)
-        policy.saved_state.append(chunk_state)
+        policy.saved_action.append(tuple(action))
+        policy.saved_state.append(tuple(state))
     return action
 
 
@@ -329,9 +330,9 @@ def main():
         explore_episodes = 0
         explore_rew =0
         my_states = {}
-        while num_steps < 10000:
+        while num_steps < 25000:
             state = env.reset()
-            for t in range(10000): # Don't infinite loop while learning
+            for t in range(1000): # Don't infinite loop while learning
                 if num_steps < 20000:
                     action = select_action(state, sample_policy, variance=VARIANCE)
                     name_str = "expl" #explore
