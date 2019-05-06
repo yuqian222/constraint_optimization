@@ -25,11 +25,11 @@ parser.add_argument('--log-interval', type=int, default=10, metavar='N',
 args = parser.parse_args()
 
 #GLOBAL VARIABLES
-INIT_WEIGHT = False
+INIT_WEIGHT = True
 CUMULATIVE = True
 PRINT_RESULTS = False
 VAR_BOUND = 1.0
-SLACK_BOUND = 0.01
+SLACK_BOUND = 0.005
 TOP_N_CONSTRIANTS = 50
 N_SAMPLES = 18
 VARIANCE = 0.01
@@ -85,8 +85,7 @@ class Value(nn.Module):
         self.value_head.weight.data.mul_(0.1)
         self.value_head.bias.data.mul_(0.0)
 
-
-        self.optimizer = optim.Adam(self.parameters())
+        self.optimizer = optim.RMSprop(self.parameters())
         self.criterion = nn.MSELoss()
 
     def forward(self, x):
@@ -103,10 +102,11 @@ class Value(nn.Module):
             for data in training_generator:
                 pred = self.forward(data["x"]).squeeze()
                 loss = self.criterion(pred, data["y"])
+                self.optimizer.zero_grad()
                 loss.backward()
                 self.optimizer.step()
                 running_loss += loss.item()
-            print("value trianing: epoch %d, loss = %.3f" %(epoch, running_loss))
+            print("value trianing: epoch %d, loss = %.3f" %(epoch, running_loss/batch_size))
 
 
 def select_action(state, policy, variance=0.1, record=True):
@@ -161,7 +161,6 @@ def create_state_dict(policy, rewards, info, my_states):
     del policy.saved_action[:]
     del policy.rewards[:]
     return my_states
-
 
 
 
@@ -351,6 +350,10 @@ def main():
         states, rewards, info = calculate_rewards(explore_episodes, sample_policy)
         values = value_net(torch.Tensor(states))
         advantages = np.subtract(np.array(rewards), values.detach().numpy().flatten())
+        print("rewards:")
+        print(rewards[:10])
+        print("values:")
+        print(values[:10].flatten())
         value_net.train(states, rewards)
 
         my_states = create_state_dict(sample_policy, advantages, info, my_states)
