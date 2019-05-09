@@ -27,13 +27,12 @@ args = parser.parse_args()
 #GLOBAL VARIABLES
 INIT_WEIGHT = False
 CUMULATIVE = True
-PRINT_RESULTS = True
-VAR_BOUND = 5.0
+VAR_BOUND = 1.0
 SLACK_BOUND = 0.005
-TOP_N_CONSTRIANTS = 100
-N_SAMPLES = 60
-VARIANCE = 0.01
-BRANCHES = 20
+TOP_N_CONSTRIANTS = 50
+N_SAMPLES = 30
+VARIANCE = 0.05
+BRANCHES = 10
 NOVELTY_SLACK = 0
 
 
@@ -49,8 +48,6 @@ def select_action(state, policy, variance=0.1, record=True):
         policy.saved_state.append(tuple(state))
     return action
 
-
-
 def calculate_rewards(myround, policy):
     R = 0
     rewards = []
@@ -64,71 +61,28 @@ def calculate_rewards(myround, policy):
                 R = 0
     else:
         rewards = policy.rewards
-    return policy.saved_state, rewards, info
+    return policy.saved_state, policy.saved_action, rewards, info
 
 
-def create_state_dict(policy, rewards, info, my_states):
-    # update the state_reward dictionary
-    for i in range(len(policy.saved_state)):
-        chunk_state = policy.saved_state[i]
-        action = policy.saved_action[i]
-        r = rewards[i]
-        step,name = info[i]
-        if chunk_state in my_states:
-            print("duplicate state")
-            if (action in my_states[chunk_state]):
-                print ("duplicate action")
-                my_states[chunk_state][action] = ((r+my_states[chunk_state][action][0])/2,step,name)
-            else:
-                my_states[chunk_state][action] = (r,step,name)
-        else:
-            my_states[chunk_state] = {}
-            my_states[chunk_state][action] = (r,step,name)
-
-    del policy.saved_state[:]
-    del policy.saved_action[:]
-    del policy.rewards[:]
-    return my_states
-
-
-
-def bestStates(my_states, top_n_constraints=-1): 
-    max_act_dict = {}
-    max_vals_dict = {}
-
-    for chunk_s in my_states:
-        max_action = max(my_states[chunk_s].items(), key=operator.itemgetter(1))[0]
-        max_act_dict[chunk_s] = max_action
-        max_vals_dict[chunk_s] = my_states[chunk_s][max_action][0]
-
-    # Get metadata of values
-    vals = list(max_vals_dict.values())
-
-    print("Max values mean: %.3f  std: %.3f  max: %.3f" % (np.mean(vals), np.std(vals), max(vals)))
-
+def best_state_actions(states, actions, rewards, info, top_n_constraints=-1): 
     if top_n_constraints > 0:
-        top_n = nlargest(top_n_constraints, max_act_dict.keys(), key=lambda s: max_vals_dict[s])
-        top_n_dict = {k: v for k, v in my_states.items() if k in top_n}
+        top_n = nlargest(top_n_constraints, zip(states, actions, rewards, info), key=lambda s: s[2])
+        return top_n
     else:
-        top_n_dict= my_states
-
-    return top_n_dict
+        return zip(states, actions, rewards, info)
 
 
-
-    
 def main():
 
     dir_name = "results/"+strftime("%m_%d_%H_%M", gmtime())
     os.makedirs(dir_name, exist_ok=True)
     logfile = open(dir_name+"/log.txt", "w")
 
-    env = gym.make('Hopper-v2')
-    N_SAMPLES = 12
+    env = gym.make('HalfCheetah-v2')
     env.seed(args.seed)
     torch.manual_seed(args.seed)
 
-    value_net = Value(env.observation_space.shape[0])
+    q_function = Value(env.observation_space.shape[0] + env.action_space.shape[0], num_hidden=48)
     Policy = Policy_lin
   
     sample_policy, sample_eval = Policy(env.observation_space.shape[0], 
@@ -141,7 +95,6 @@ def main():
             params=pickle.load(f)
             sample_policy.init_weight(params)
 
-
     for i_episode in count(1):
         # Exploration
         num_steps = 0
@@ -151,13 +104,9 @@ def main():
         while num_steps < 25000:
             state = env.reset()
             for t in range(1000): # Don't infinite loop while learning
-                if num_steps < 20000:
-                    action = select_action(state, sample_policy, variance=VARIANCE)
-                    name_str = "expl" #explore
-                else: 
-                    action = select_action(state, sample_policy, variance=0) # 20% randomly good
-                    name_str = "eval" #exploit
-
+                action = select_action(state, sample_policy, variance=VARIANCE)
+                name_str = "expl" #explore
+                
                 next_state, reward, done, _ = env.step(action)
                 explore_rew += reward
                 sample_policy.rewards.append((reward, t, "%s_%d"%(name_str, explore_episodes)))
@@ -171,20 +120,26 @@ def main():
         
         explore_rew /= explore_episodes
 
-        states, rewards, info = calculate_rewards(explore_episodes, sample_policy)
-        values = value_net(torch.Tensor(states))
-        advantages = np.subtract(np.array(rewards), values.detach().numpy().flatten())
-        print("rewards:")
-        print(rewards[:10])
-        print("values:")
-        print(values[:10].flatten())
-        value_net.train(states, rewards)
+        states, actions, rewards, info = calculate_rewards(explore_episodes, sample_policy)
+        input_tensor = torch.cat((torch.Tensor(states), torch.Tensor(actions)),1)
+        q_function.train(input_tensor, rewards, epoch=10)
 
-        my_states = create_state_dict(sample_policy, advantages, info, my_states)
+        best_tuples = best_state_actions(states, actions, rewards, info, top_n_constraints=TOP_N_CONSTRIANTS)
+
+        action_grad = []
+        for s, a in zip(states, actions):
+            a_new = q_function.calculate_action_grad(torch.Tensor(s), torch.Tensor(a))
+            action_grad.append(tuple(a_new.detach().numpy()))
+
+        print(rewards[:10])
+        print(actions[:10])
+        print(action_grad[:10])
+
+        sample_policy.clean()
 
         # sample and solve
-        constraints_dict = bestStates(my_states, top_n_constraints=TOP_N_CONSTRIANTS) #only keep the best states
-        max_policy, max_eval, max_set = sample_policy, sample_eval, constraints_dict
+        
+        max_policy, max_eval, max_set = sample_policy, sample_eval, best_tuples
 
         print('\nEpisode {}\tExplore reward: {:.2f}\n'.format(i_episode, explore_rew))
 
@@ -192,34 +147,16 @@ def main():
             branch_policy = Policy(env.observation_space.shape[0], 
                                             env.action_space.shape[0], 
                                             VAR_BOUND, SLACK_BOUND)
-            constraints = dict(random.sample(constraints_dict.items(), N_SAMPLES))
+            print(len(best_tuples))
+            constraints = random.sample(best_tuples, N_SAMPLES)
 
             # Get metadata of constraints
-            constraint_info = list(constraints.values())
-            vals = [list(v.values())[0][0] for v in constraint_info]
-            print("ep %d b %d: constraint mean: %.3f  std: %.3f  max: %.3f" % (i_episode, branch, np.mean(vals), np.std(vals), max(vals)))
+            states, actions, rewards, info = zip(*constraints)
+            print("ep %d b %d: constraint mean: %.3f  std: %.3f  max: %.3f" % (i_episode, branch, np.mean(rewards), np.std(rewards), max(rewards)))
             print("constraint set's episode and step number:")
-            print([list(v.values())[0] for v in constraint_info])
+            print(info)
 
-            # Solve
-            (result, s_actions) = branch_policy.solve(constraints)
-            if s_actions == 0:
-                print ("No valid constraint")
-                continue
-            elif result.status == GRB.Status.OPTIMAL:
-                print ("update Param using solved solution")
-                branch_policy.updateParam(result)
-            elif result.status == GRB.Status.INF_OR_UNBD or result.status == GRB.Status.INFEASIBLE:
-                print ("Infeasible or unbounded")
-                continue
-            else:
-                print ("Unsat / numerical problem")
-                continue
-            
-            '''
-            print("L2_NORM")
-            print(all_l2_norm(constraints))
-            '''
+            sample_policy.train(states, actions)
 
             # Evaluate
             num_steps = 0
@@ -242,8 +179,8 @@ def main():
                 eval_episodes += 1
             eval_rew /= eval_episodes
 
-            states, rewards, _ = calculate_rewards(eval_episodes, branch_policy)
-            value_net.train(states, rewards)
+            branch_policy.clean()
+
 
             #log
             print('Episode {}\tBranch: {}\tEval reward: {:.2f}\tExplore reward: {:.2f}'.format(
@@ -256,7 +193,7 @@ def main():
         # the end of branching
         if max_eval > sample_eval - NOVELTY_SLACK:
             with open("%s/%d.p"%(dir_name,i_episode), "wb") as f:
-                pickle.dump({"all": constraints_dict, "constraints": max_set}, f)
+                pickle.dump({"all": best_tuples, "constraints": max_set}, f)
             sample_policy, sample_eval = max_policy, max_eval
 
 def all_l2_norm(constraints):
