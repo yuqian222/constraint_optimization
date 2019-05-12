@@ -27,7 +27,7 @@ class Policy_lin(nn.Module):
         self.saved_state = []
         self.rewards = []
 
-        self.optimizer = optim.RMSprop(self.parameters())
+        self.optimizer = optim.RMSprop(self.parameters(),  lr=1e-3)
         self.criterion = nn.MSELoss()
 
     def random_initialize(self):
@@ -126,15 +126,27 @@ class Policy_lin(nn.Module):
         training_set = value_dataset(x, y)
         training_generator = DataLoader(training_set,  batch_size=batches, shuffle=True)
         for epoch in range(epoch):
-            running_loss = 0
+            running_loss = []
             for data in training_generator:
                 pred = self.forward(data["x"]).squeeze()
                 loss = self.criterion(pred, data["y"])
                 self.optimizer.zero_grad()
                 loss.backward()
                 self.optimizer.step()
-                running_loss += loss.item()
-            print("Policy trianing: epoch %d, loss = %.3f" %(epoch, running_loss))
+                running_loss.append(loss.item())
+            if epoch % 100 == 0:
+                print("Policy trianing: epoch %d, loss = %.3f" %(epoch, sum(running_loss)/len(running_loss)))
+
+    def train_Q(self, states, Q, epoch = 3):
+        for ep in range(epoch):
+            actions = self(states)
+            loss = -Q(torch.cat((states,actions), dim=1)).sum()
+            self.optimizer.zero_grad()
+            loss.backward()
+            self.optimizer.step()
+            print("policy trianing: epoch %d, loss = %.3f" %(ep, loss.item()))
+
+
 
     def clean(self):
         del self.saved_state[:]
@@ -156,16 +168,18 @@ class Value(nn.Module):
         super(Value, self).__init__()
         self.affine1 = nn.Linear(num_inputs, num_hidden)
         self.affine2 = nn.Linear(num_hidden, num_hidden)
+        self.affine3 = nn.Linear(num_hidden, num_hidden)
         self.value_head = nn.Linear(num_hidden, 1)
         self.value_head.weight.data.mul_(0.1)
         self.value_head.bias.data.mul_(0.0)
 
-        self.optimizer = optim.RMSprop(self.parameters())
+        self.optimizer = optim.RMSprop(self.parameters(), weight_decay=0.0005)
         self.criterion = nn.MSELoss()
 
     def forward(self, x):
-        x = F.relu(self.affine1(x))
-        x = F.relu(self.affine2(x))
+        x = torch.tanh(self.affine1(x))
+        x = torch.tanh(self.affine2(x))
+        x = torch.tanh(self.affine3(x))
         state_values = self.value_head(x)
         return state_values
 
@@ -183,17 +197,83 @@ class Value(nn.Module):
                 running_loss += loss.item()
             print("value trianing: epoch %d, loss = %.3f" %(epoch, running_loss/batch_size))
 
-    def calculate_action_grad(self, state, action, rew_delta=0.01, step_size = 0.1): 
+    def calculate_action_grad(self, state, action, rew_delta=0.01, step_size = 0.005): 
         #only make sense if this is used as q function
+        if step_size == 0:
+            return action
         action_var = torch.autograd.Variable(action, requires_grad=True)
         input_tensor = torch.cat((state, action_var))
         desired = self(input_tensor) + rew_delta
         desired.backward()
-        return action+step_size*action_var.grad
+        grad_norm = torch.norm(action_var.grad).detach()
+        step = step_size*(action_var.grad/grad_norm)
+        if torch.isnan(step).any():
+            return action
+        return action + step
 
-# Unimportatn backlog
+class Policy_Q(nn.Module):
+    def __init__(self, num_inputs, num_hidden, num_outputs, initialize = True):
+        super(Policy_lin, self).__init__()
+
+        self.policy = nn.Linear(num_inputs, num_outputs)
+
+        self.Q1 = nn.Linear(num_inputs+num_outputs, num_hidden)
+        self.Q2 = nn.Linear(num_hidden, num_hidden)
+        self.Q_head = nn.Linear(num_hidden, 1)
+        
+        if initialize:
+            nn.init.uniform_(self.affine1.weight.data, a=-0.1, b=0.1)
+            nn.init.uniform_(self.affine1.bias.data, 0.0)
+            self.Q_head.weight.data.mul_(0.1)
+            self.Q_head.bias.data.mul_(0.0)
 
 
+        self.saved_action = []
+        self.saved_state = []
+        self.rewards = []
+
+        self.optimizer = optim.RMSprop(self.parameters(), weight_decay=0.01)
+        self.criterion = nn.MSELoss()
+
+    def forward(self, s):
+        a = self.policy(s)
+        return a 
+
+    def forward_Q(self, s_a):
+
+        q = F.relu(self.Q1(s_a))
+        q = F.relu(self.Q2(q))
+        q = self.Q_head(q)
+
+        return q
+
+
+    def train_Q(self, x, y, batch_size = 5, epoch = 3):
+        training_set = value_dataset(x, y)
+        training_generator = DataLoader(training_set,  batch_size=batch_size, shuffle=True)
+        for epoch in range(epoch):
+            running_loss = 0
+            for data in training_generator:
+                pred = self.forward_Q(data["x"]).squeeze()
+                loss = self.criterion(pred, data["y"])
+                self.optimizer.zero_grad()
+                loss.backward()
+                self.optimizer.step()
+                running_loss += loss.item()
+            print("value trianing: epoch %d, loss = %.3f" %(epoch, running_loss))
+
+    def train_policy(self, states, epoch = 5):
+        for ep in range(epoch):
+            actions = self(states)
+            loss = -self.forward_Q(torch.cat((states,actions), dim=1))
+            self.optimizer.zero_grad()
+            loss.backward()
+            self.optimizer.step()
+            print("policy trianing: epoch %d, loss = %.3f" %(ep, loss.item()))
+
+
+
+# trash
 class Policy_relu(nn.Module):
     def __init__(self, num_inputs, num_outputs,  var_bound, slack_bound, num_hidden=24, initialize = True):
         super(Policy_relu, self).__init__()
