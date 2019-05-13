@@ -13,7 +13,7 @@ from torch.distributions import Categorical, Bernoulli
 from gurobipy import *
 
 class Policy_lin(nn.Module):
-    def __init__(self, num_inputs, num_outputs, var_bound, slack_bound, initialize = True):
+    def __init__(self, num_inputs, num_outputs, var_bound=1.0, slack_bound=0.01, initialize = True):
         super(Policy_lin, self).__init__()
         self.var_bound = var_bound
         self.slack_bound = slack_bound
@@ -146,8 +146,6 @@ class Policy_lin(nn.Module):
             self.optimizer.step()
             print("policy trianing: epoch %d, loss = %.3f" %(ep, loss.item()))
 
-
-
     def clean(self):
         del self.saved_state[:]
         del self.saved_action[:]
@@ -195,7 +193,7 @@ class Value(nn.Module):
                 loss.backward()
                 self.optimizer.step()
                 running_loss += loss.item()
-            print("value trianing: epoch %d, loss = %.3f" %(epoch, running_loss/batch_size))
+            print("value trianing: epoch %d, ave. loss = %.3f" %(epoch, running_loss/len(training_generator)))
 
     def calculate_action_grad(self, state, action, rew_delta=0.01, step_size = 0.005): 
         #only make sense if this is used as q function

@@ -4,3 +4,4 @@ baseline_policy.py
 gurobi.log
 filewk.lp
 .ipynb_checkpoints/*
+__pycache__/*

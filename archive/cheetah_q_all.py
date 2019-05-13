@@ -27,12 +27,13 @@ args = parser.parse_args()
 #GLOBAL VARIABLES
 INIT_WEIGHT = False
 CUMULATIVE = True
-PRINT_RESULTS = True
-VAR_BOUND = 5.0
+PRINT_RESULTS = False
+SOLVE = False
+VAR_BOUND = 1.0
 SLACK_BOUND = 0.005
 TOP_N_CONSTRIANTS = 100
 N_SAMPLES = 60
-VARIANCE = 0.01
+VARIANCE = 0.1
 BRANCHES = 20
 NOVELTY_SLACK = 0
 
@@ -49,8 +50,6 @@ def select_action(state, policy, variance=0.1, record=True):
         policy.saved_state.append(tuple(state))
     return action
 
-
-
 def calculate_rewards(myround, policy):
     R = 0
     rewards = []
@@ -64,20 +63,62 @@ def calculate_rewards(myround, policy):
                 R = 0
     else:
         rewards = policy.rewards
-    return policy.saved_state, rewards, info
+    return policy.saved_state, policy.saved_action, rewards, info
 
+
+def create_state_dict(states, actions, rewards, info, my_states):
+    # update the state_reward dictionary
+    for s, a, r, i in zip(states, actions, rewards, info):
+        step,name = i[0], i[1]
+        if s in my_states:
+            print("duplicate state")
+            if (a in my_states[s]):
+                print ("duplicate a")
+                my_states[s][a] = ((r+my_states[s][a][0])/2,step,name)
+            else:
+                my_states[s][a] = (r,step,name)
+        else:
+            my_states[s] = {}
+            my_states[s][a] = (r,step,name)
+
+    return my_states
+
+
+
+def bestStates(my_states, top_n_constraints=-1): 
+    max_act_dict = {}
+    max_vals_dict = {}
+
+    for chunk_s in my_states:
+        max_action = max(my_states[chunk_s].items(), key=operator.itemgetter(1))[0]
+        max_act_dict[chunk_s] = max_action
+        max_vals_dict[chunk_s] = my_states[chunk_s][max_action][0]
+
+    # Get metadata of values
+    vals = list(max_vals_dict.values())
+
+    print("Max values mean: %.3f  std: %.3f  max: %.3f" % (np.mean(vals), np.std(vals), max(vals)))
+
+    if top_n_constraints > 0:
+        top_n = nlargest(top_n_constraints, max_act_dict.keys(), key=lambda s: max_vals_dict[s])
+        top_n_dict = {k: v for k, v in my_states.items() if k in top_n}
+    else:
+        top_n_dict= my_states
+
+    return top_n_dict
+
+    
 def main():
 
     dir_name = "results/"+strftime("%m_%d_%H_%M", gmtime())
     os.makedirs(dir_name, exist_ok=True)
     logfile = open(dir_name+"/log.txt", "w")
 
-    env = gym.make('Hopper-v2')
-    N_SAMPLES = 12
+    env = gym.make('HalfCheetah-v2')
     env.seed(args.seed)
     torch.manual_seed(args.seed)
 
-    value_net = Value(env.observation_space.shape[0])
+    q_function = Value(env.observation_space.shape[0] + env.action_space.shape[0], num_hidden=48)
     Policy = Policy_lin
   
     sample_policy, sample_eval = Policy(env.observation_space.shape[0], 
@@ -97,10 +138,10 @@ def main():
         explore_episodes = 0
         explore_rew =0
         my_states = {}
-        while num_steps < 25000:
+        while num_steps < 15000:
             state = env.reset()
             for t in range(1000): # Don't infinite loop while learning
-                if num_steps < 20000:
+                if num_steps < 12000:
                     action = select_action(state, sample_policy, variance=VARIANCE)
                     name_str = "expl" #explore
                 else: 
@@ -120,93 +161,55 @@ def main():
         
         explore_rew /= explore_episodes
 
-        states, rewards, info = calculate_rewards(explore_episodes, sample_policy)
-        values = value_net(torch.Tensor(states))
-        advantages = np.subtract(np.array(rewards), values.detach().numpy().flatten())
-        print("rewards:")
-        print(rewards[:10])
-        print("values:")
-        print(values[:10].flatten())
-        value_net.train(states, rewards)
+        states, actions, rewards, info = calculate_rewards(explore_episodes, sample_policy)
+        input_tensor = torch.cat((torch.Tensor(states), torch.Tensor(actions)),1)
+        q_function.train(input_tensor, rewards, epoch=6)
 
-        my_states = create_state_dict(sample_policy, advantages, info, my_states)
+        action_grad = []
+        for s, a in zip(states, actions):
+            a_new = q_function.calculate_action_grad(torch.Tensor(s), torch.Tensor(a))
+            action_grad.append(tuple(a_new.detach().numpy()))
 
-        # sample and solve
-        constraints_dict = bestStates(my_states, top_n_constraints=TOP_N_CONSTRIANTS) #only keep the best states
-        max_policy, max_eval, max_set = sample_policy, sample_eval, constraints_dict
+        print(actions[:10])
+        print(action_grad[:10])
 
         print('\nEpisode {}\tExplore reward: {:.2f}\n'.format(i_episode, explore_rew))
+        sample_policy.train(states, action_grad)
+        sample_policy.clean()
 
-        for branch in range(BRANCHES):
-            branch_policy = Policy(env.observation_space.shape[0], 
-                                            env.action_space.shape[0], 
-                                            VAR_BOUND, SLACK_BOUND)
-            constraints = dict(random.sample(constraints_dict.items(), N_SAMPLES))
 
-            # Get metadata of constraints
-            constraint_info = list(constraints.values())
-            vals = [list(v.values())[0][0] for v in constraint_info]
-            print("ep %d b %d: constraint mean: %.3f  std: %.3f  max: %.3f" % (i_episode, branch, np.mean(vals), np.std(vals), max(vals)))
-            print("constraint set's episode and step number:")
-            print([list(v.values())[0] for v in constraint_info])
+        # Evaluate
+        num_steps = 0
+        eval_episodes = 0
+        eval_rew = 0
+        while num_steps < 6000:
+            state = env.reset()
+            eval_sum = 0
+            for t in range(10000): # Don't infinite loop while learning
+                action = select_action(state, sample_policy, variance=0)
+                state, reward, done, _ = env.step(action)
+                eval_rew += reward
+                sample_policy.rewards.append((reward, t, "%s_%d"%(name_str, explore_episodes)))
 
-            # Solve
-            (result, s_actions) = branch_policy.solve(constraints)
-            if s_actions == 0:
-                print ("No valid constraint")
-                continue
-            elif result.status == GRB.Status.OPTIMAL:
-                print ("update Param using solved solution")
-                branch_policy.updateParam(result)
-            elif result.status == GRB.Status.INF_OR_UNBD or result.status == GRB.Status.INFEASIBLE:
-                print ("Infeasible or unbounded")
-                continue
-            else:
-                print ("Unsat / numerical problem")
-                continue
-            
-            '''
-            print("L2_NORM")
-            print(all_l2_norm(constraints))
-            '''
+                if args.render:
+                    env.render()
+                if done:
+                    break
+            num_steps += (t-1)
+            eval_episodes += 1
+        eval_rew /= eval_episodes
 
-            # Evaluate
-            num_steps = 0
-            eval_episodes = 0
-            eval_rew = 0
-            while num_steps < 6000:
-                state = env.reset()
-                eval_sum = 0
-                for t in range(10000): # Don't infinite loop while learning
-                    action = select_action(state, branch_policy, variance=0)
-                    state, reward, done, _ = env.step(action)
-                    eval_rew += reward
-                    branch_policy.rewards.append((reward, t, "%s_%d"%(name_str, explore_episodes)))
+        
+        states, actions, rewards, info = calculate_rewards(explore_episodes, sample_policy)
+        input_tensor = torch.cat((torch.Tensor(states), torch.Tensor(actions)),1)
+        q_function.train(input_tensor, rewards)
+        sample_policy.clean()
 
-                    if args.render:
-                        env.render()
-                    if done:
-                        break
-                num_steps += (t-1)
-                eval_episodes += 1
-            eval_rew /= eval_episodes
+        #log
+        print('Episode {}\tEval reward: {:.2f}\tExplore reward: {:.2f}'.format(
+            i_episode, eval_rew, explore_rew))
+        logfile.write('Episode {}\tEval reward: {:.2f}\n'.format(i_episode, eval_rew))
 
-            states, rewards, _ = calculate_rewards(eval_episodes, branch_policy)
-            value_net.train(states, rewards)
-
-            #log
-            print('Episode {}\tBranch: {}\tEval reward: {:.2f}\tExplore reward: {:.2f}'.format(
-                i_episode, branch, eval_rew, explore_rew))
-            logfile.write('Episode {}\tBranch: {}\tEval reward: {:.2f}\n'.format(i_episode, branch, eval_rew))
-
-            if eval_rew > max_eval:
-                max_eval, max_policy, max_set = eval_rew, branch_policy, constraints
-
-        # the end of branching
-        if max_eval > sample_eval - NOVELTY_SLACK:
-            with open("%s/%d.p"%(dir_name,i_episode), "wb") as f:
-                pickle.dump({"all": constraints_dict, "constraints": max_set}, f)
-            sample_policy, sample_eval = max_policy, max_eval
 
 def all_l2_norm(constraints):
     states = list(constraints.keys())
