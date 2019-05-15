@@ -76,7 +76,7 @@ def best_state_actions(states, actions, rewards, info, top_n_constraints=-1):
 
 def main():
 
-    dir_name = "results/"+strftime("%m_%d_%H_%M", gmtime())
+    dir_name = "results/%s/%s"%(ENV, strftime("%m_%d_%H_%M", gmtime()))
     os.makedirs(dir_name, exist_ok=True)
     logfile = open(dir_name+"/log.txt", "w")
 
@@ -140,13 +140,13 @@ def main():
         input_tensor = torch.cat((torch.Tensor(states), torch.Tensor(actions)),1)
         
         q_function.train(input_tensor, rewards, epoch=10)
-        
+        '''
         action_grad = []
         for s, a in zip(states, actions):
             a_new = q_function.calculate_action_grad(torch.Tensor(s), torch.Tensor(a), step_size=STEP_SIZE)
             action_grad.append(tuple(a_new.detach().numpy()))
-
-        best_tuples = best_state_actions(states, action_grad, rewards, info, top_n_constraints=TOP_N_CONSTRIANTS)
+        '''
+        best_tuples = best_state_actions(states, actions, rewards, info, top_n_constraints=TOP_N_CONSTRIANTS)
 
 
         sample_policy.clean()
