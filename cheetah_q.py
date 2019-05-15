@@ -84,8 +84,9 @@ def main():
     env.seed(args.seed)
     torch.manual_seed(args.seed)
 
-    # just to make more robust for 
+    # just to make more robust for differnet envs
     N_SAMPLES = env.observation_space.shape[0]+2
+    TOP_N_CONSTRIANTS = N_SAMPLES*2
 
     q_function = Value(env.observation_space.shape[0] + env.action_space.shape[0], num_hidden=64)
     Policy = Policy_lin
