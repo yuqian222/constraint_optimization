@@ -151,6 +151,72 @@ class Policy_lin(nn.Module):
         del self.saved_action[:]
         del self.rewards[:]
 
+
+class Policy_quad(nn.Module):
+    def __init__(self, num_inputs, num_outputs, num_hidden=24, initialize = True):
+        super(Policy_lin, self).__init__()
+        self.var_bound = var_bound
+        self.slack_bound = slack_bound
+
+        self.affine1 = nn.Linear(num_inputs, num_hidden)
+        self.affine2 = nn.Linear(num_hidden, num_outputs)
+
+        if initialize:
+            self.random_initialize()
+
+        self.saved_action = []
+        self.saved_state = []
+        self.rewards = []
+
+        self.optimizer = optim.RMSprop(self.parameters(),  lr=1e-3)
+        self.criterion = nn.MSELoss()
+
+    def random_initialize(self):
+        for l in [self.affine1, self.affine2]:
+            nn.init.uniform_(l.weight.data, a=-0.1, b=0.1)
+            nn.init.uniform_(l.bias.data, 0.0)
+
+    def init_weight(self, dic):
+        for neuron_idx in range(self.affine1.weight.size(0)):
+            self.affine1.bias.data[neuron_idx] = dic[("bias",neuron_idx)]
+            for prev_neuron_idx in range(self.affine1.weight.size(1)):
+                self.affine1.weight.data[neuron_idx][prev_neuron_idx] = dic[(neuron_idx,prev_neuron_idx)]
+    
+    def forward(self, x):
+        x = torch.tanh(self.affine1(x))
+        action = torch.tanh(self.affine2(x))
+        return action
+    
+
+    def train(self, x, y, batches = 5, epoch = 3):
+        training_set = value_dataset(x, y)
+        training_generator = DataLoader(training_set,  batch_size=batches, shuffle=True)
+        for epoch in range(epoch):
+            running_loss = []
+            for data in training_generator:
+                pred = self.forward(data["x"]).squeeze()
+                loss = self.criterion(pred, data["y"])
+                self.optimizer.zero_grad()
+                loss.backward()
+                self.optimizer.step()
+                running_loss.append(loss.item())
+            if epoch % 100 == 0:
+                print("Policy trianing: epoch %d, loss = %.3f" %(epoch, sum(running_loss)/len(running_loss)))
+
+    def train_Q(self, states, Q, epoch = 3):
+        for ep in range(epoch):
+            actions = self(states)
+            loss = -Q(torch.cat((states,actions), dim=1)).sum()
+            self.optimizer.zero_grad()
+            loss.backward()
+            self.optimizer.step()
+            print("policy trianing: epoch %d, loss = %.3f" %(ep, loss.item()))
+
+    def clean(self):
+        del self.saved_state[:]
+        del self.saved_action[:]
+        del self.rewards[:]
+
 class value_dataset(Dataset):
     def __init__(self, x, y):
         self.x = Variable(torch.Tensor(x))

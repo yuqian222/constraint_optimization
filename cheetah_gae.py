@@ -11,6 +11,8 @@ from torch.utils.data import Dataset,DataLoader
 from torch.autograd import Variable
 from torch.distributions import Categorical, Bernoulli
 from gurobipy import *
+from policies import *
+
 
 
 parser = argparse.ArgumentParser(description='PyTorch REINFORCE example')
@@ -42,67 +44,11 @@ torch.manual_seed(args.seed)
 num_inputs  = env.observation_space.shape[0]
 num_outputs = env.action_space.shape[0]
 
-class Policy(nn.Module):
-    def __init__(self, num_inputs, num_outputs, initialize = True):
-        super(Policy, self).__init__()
-        self.affine1 = nn.Linear(num_inputs, num_outputs)
-
-        if initialize:
-            self.random_initialize()
-
-        self.saved_action = []
-        self.saved_state = []
-        self.saved_log_probs = []
-        self.rewards = []
-
-
-    def random_initialize(self):
-        nn.init.uniform_(self.affine1.weight.data, a=-0.1, b=0.1)
-        nn.init.uniform_(self.affine1.bias.data, 0.0)
-
-    def init_weight(self, dic):
-
-        for neuron_idx in range(self.affine1.weight.size(0)):
-            self.affine1.bias.data[neuron_idx] = dic[("bias",neuron_idx)]
-            for prev_neuron_idx in range(self.affine1.weight.size(1)):
-                self.affine1.weight.data[neuron_idx][prev_neuron_idx] = dic[(neuron_idx,prev_neuron_idx)]
-
-    def forward(self, x):
-        # x = F.tanh(self.affine1(x))
-        action_scores = self.affine1(x)
-        return action_scores
-
-class value_dataset(Dataset):
-    def __init__(self, x, y):
-        self.x = Variable(torch.Tensor(x))
-        self.y = Variable(torch.Tensor(y))
-        assert(len(x) == len(y))
-    def  __len__(self):
-        return self.x.shape[0]
-    def __getitem__(self, idx):
-        return {"x": self.x[idx], "y": self.y[idx]}
-
-class Value(nn.Module):
-    def __init__(self, num_inputs):
-        super(Value, self).__init__()
-        self.affine1 = nn.Linear(num_inputs, 24)
-        self.affine2 = nn.Linear(24, 24)
-        self.value_head = nn.Linear(24, 1)
-        self.value_head.weight.data.mul_(0.1)
-        self.value_head.bias.data.mul_(0.0)
-
-    def forward(self, x):
-        x = torch.tanh(self.affine1(x))
-        x = torch.tanh(self.affine2(x))
-        state_values = self.value_head(x)
-        return state_values
-
 
 def select_action(state, policy, variance=0.1, record=True):
     action = policy(state).data.numpy()
     action = np.random.normal(action, [variance]*len(action))
     return action
-
 
 
 def compute_gae(next_value, rewards, masks, values, gamma=0.99, tau=0.95):
@@ -115,144 +61,14 @@ def compute_gae(next_value, rewards, masks, values, gamma=0.99, tau=0.95):
         returns.insert(0, gae + values[step])
     return returns
 
-def create_state_dict(states, actions, rewards, info, my_states):
-    # update the state_reward dictionary
-    for i in range(len(states)):
-        chunk_state = states[i]
-        action = actions[i]
-        r = rewards[i]
-        step,name = info[i]
-        if chunk_state in my_states:
-            my_states[chunk_state][action] = (r,step,name)
-        else:
-            my_states[chunk_state] = {}
-            my_states[chunk_state][action] = (r,step,name)
-    return my_states
 
-
-
-def bestStates(my_states, top_n_constraints=-1): 
-    max_act_dict = {}
-    max_vals_dict = {}
-
-    for chunk_s in my_states:
-        max_action = max(my_states[chunk_s].items(), key=operator.itemgetter(1))[0]
-        max_act_dict[chunk_s] = max_action
-        max_vals_dict[chunk_s] = my_states[chunk_s][max_action][0]
-
-    # Get metadata of values
-    vals = list(max_vals_dict.values())
-
-    print("Max values mean: %.3f  std: %.3f  max: %.3f" % (np.mean(vals), np.std(vals), max(vals)))
-
+def best_state_actions(states, actions, rewards, info, top_n_constraints=-1): 
     if top_n_constraints > 0:
-        top_n = nlargest(top_n_constraints, max_act_dict.keys(), key=lambda s: max_vals_dict[s])
-        top_n_dict = {k: v for k, v in my_states.items() if k in top_n}
+        top_n = nlargest(top_n_constraints, zip(states, actions, rewards, info), key=lambda s: s[2])
+        return top_n
     else:
-        top_n_dict= my_states
-    return top_n_dict
+        return zip(states, actions, rewards, info)
 
-
-def solveNetwork(my_states,  policy_net, firstParam, firstBias, prob):
-    formulas = []
-    s_actions = 0
-    count = 0
-    slack_vars = []
-    
-    # TODO 
-    for state, action_dict in my_states.items():
-        #print("constraint! state: %s  val: %.3f" % (state, max_vals_dict[state]))
-        action = list(action_dict)[0]
-        exprs = []
-        for neuron_idx in range(policy_net.affine1.weight.size(0)): # 0, 1
-            lin_expr = firstBias[neuron_idx]
-            for prev_neuron_idx in range(0,policy_net.affine1.weight.size(1)): # 4
-                # print neuron_idx + prev_neuron_idx*hidden_size
-                var = firstParam[(neuron_idx, prev_neuron_idx)]
-                lin_expr = lin_expr + state[prev_neuron_idx]*var
-
-            exprs.append(lin_expr)
-        index = 0
-        for exp in exprs:
-            slack = prob.addVar(lb=-SLACK_BOUND, ub=SLACK_BOUND, vtype=GRB.CONTINUOUS)
-            slack_vars.append(slack)
-            newexpr1 = (exp+slack == action[index])
-            # newexpr2 = (exp >= action[index])
-            count += 1
-            prob.addConstr(newexpr1)
-            index += 1
-
-    # objective that minimizes sum of slack variables
-    obj = 0
-    for e in slack_vars:
-        obj += e*e #abs value
-
-    prob.setObjective(obj, GRB.MINIMIZE)
-
-    print ("Number of constraints are ", count)
-
-    if (count == 0):
-        return (prob, 0)
-    prob.optimize()
-    prob.write("filewk.lp")
-    return (prob, 1)
-
-
-def updateParam(prob, policy_net):
-    result = []
-    result_name = []
-    print ("Update parameter")
-    for v in prob.getVars():
-        result.append(v.x)
-        result_name.append(v.varName)
-    if PRINT_RESULTS:
-        print(policy_net.affine1.weight)
-        print(result)
-
-    indices = 0
-    for neuron_idx in range(policy_net.affine1.weight.size(0)):
-        policy_net.affine1.bias.data[neuron_idx] = result[indices]
-        indices +=1
-        for prev_neuron_idx in range(policy_net.affine1.weight.size(1)):
-            val = result[indices]
-           
-            policy_net.affine1.weight.data[neuron_idx][prev_neuron_idx] = val
-            indices += 1
-
-
-def initializeLimits(policy_net, prob):
-    firstParam = {}
-    firstBias = [None]*policy_net.affine1.bias.size(0)
-
-    for neuron_idx in range(policy_net.affine1.weight.size(0)):
-        bias = prob.addVar(lb=-VAR_BOUND, ub=VAR_BOUND, vtype=GRB.CONTINUOUS, name="b" + str(neuron_idx))
-        firstBias[neuron_idx] = bias
-        for prev_neuron_idx in range(policy_net.affine1.weight.size(1)): #4
-            coeff = "x" + str(neuron_idx) +"_"+ str(prev_neuron_idx)
-            var = prob.addVar(lb=-VAR_BOUND, ub=VAR_BOUND, vtype=GRB.CONTINUOUS, name=coeff)
-            firstParam[(neuron_idx, prev_neuron_idx)] = var
-
-    return firstParam, firstBias
-
-def solvePolicy(constraints, policy, firstParam, firstBias, prob):
-    print ("Length of mystate dictionary is" , len(constraints))
-
-    (result, s_actions) = solveNetwork(constraints, policy, firstParam, firstBias, prob)
-
-    if s_actions == 0:
-        print ("No valid constraint")
-        return 1
-    if prob.status == GRB.Status.OPTIMAL:
-        print ("update Param using solved solution")
-        return 0
-    if prob.status == GRB.Status.INF_OR_UNBD:
-        print ("Infeasible or unbounded")
-        return 1
-    if prob.status == GRB.Status.INFEASIBLE:
-        print('Optimization was stopped with status %d' % prob.status)
-        print ("Infeasible!!!")
-        return 1
-    return 2 
 
 def sample(policy, value_net, optimizer, env, total_steps, var=0):
     num_steps, rew, rollouts, t = 0, 0, 0, 0
@@ -297,15 +113,9 @@ def sample(policy, value_net, optimizer, env, total_steps, var=0):
     next_value = value_net(torch.FloatTensor(next_state))
     returns = compute_gae(next_value, rewards, masks, values)
     advantages = torch.cat(returns).detach() - torch.cat(values)
-
-    # train value function  
-    vloss = advantages.pow(2).mean()
-    optimizer.zero_grad()
-    vloss.backward()
-    optimizer.step()
-
+    
     total_reward = rew/rollouts
-    return states, actions, advantages.numpy(), info, total_reward
+    return states, actions, advantages.detach().numpy(), info, total_reward
 
 def main():
 
@@ -316,7 +126,7 @@ def main():
     value_net = Value(num_inputs)
     optimizer = optim.RMSprop(value_net.parameters())
 
-    sample_policy, sample_eval = Policy(num_inputs, num_outputs), float("-inf")
+    sample_policy, sample_eval = Policy_lin(num_inputs, num_outputs), float("-inf")
 
     if INIT_WEIGHT:
         sample_eval = 1300
