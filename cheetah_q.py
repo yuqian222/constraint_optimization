@@ -26,6 +26,9 @@ parser.add_argument('--branches', type=int, default=5, metavar='N',
                     help='branches per round (default: 5)')
 parser.add_argument('--iter_steps', type=int, default=20000, metavar='N',
                     help='num steps per iteration (default: 20,000)')
+
+parser.add_argument('--var', type=float, default=0.1,
+                    help='sample variance (default: 0.1)')
 args = parser.parse_args()
 
 #GLOBAL VARIABLES
