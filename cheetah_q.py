@@ -112,10 +112,10 @@ def main():
         while num_steps < MAX_STEPS:
             state = env.reset()
             for t in range(1000): # Don't infinite loop while learning
-                if num_steps < MAX_STEPS*0.4:
+                if num_steps < MAX_STEPS*0.35:
                     action = select_action(state, sample_policy, variance=VARIANCE)
                     name_str = "expl_var" #explore
-                elif num_steps < MAX_STEPS*0.4:
+                elif num_steps < MAX_STEPS*0.35:
                     action = select_action(state, sample_policy, variance=VARIANCE)
                     new_a = q_function.calculate_action_grad(torch.Tensor(state), torch.Tensor(action), step_size=STEP_SIZE)
                     action = tuple(new_a.detach().numpy())
