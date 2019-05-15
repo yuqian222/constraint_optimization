@@ -13,19 +13,19 @@ from torch.distributions import Categorical, Bernoulli
 from policies import *
 
 
-parser = argparse.ArgumentParser(description='PyTorch REINFORCE example')
+parser = argparse.ArgumentParser(description='cheetah_q parser')
 parser.add_argument('--gamma', type=float, default=0.9, metavar='G',
                     help='discount factor (default: 0.99)')
 parser.add_argument('--seed', type=int, default=543, metavar='N',
                     help='random seed (default: 543)')
 parser.add_argument('--render', action='store_true',
                     help='render the environment')
-parser.add_argument('--log-interval', type=int, default=10, metavar='N',
-                    help='interval between training status logs (default: 10)')
+parser.add_argument('--env', type=str, default='HalfCheetah-v2',
+                    help='enviornment (default: HalfCheetah-v2)')
 args = parser.parse_args()
 
 #GLOBAL VARIABLES
-ENV = 'HalfCheetah-v2'
+ENV = args.env
 INIT_WEIGHT = False
 CUMULATIVE = True
 TOP_N_CONSTRIANTS = 60
