@@ -22,6 +22,8 @@ parser.add_argument('--render', action='store_true',
                     help='render the environment')
 parser.add_argument('--env', type=str, default='HalfCheetah-v2',
                     help='enviornment (default: HalfCheetah-v2)')
+parser.add_argument('--branches', type=int, default=5, metavar='N',
+                    help='branches per round (default: 5)')
 args = parser.parse_args()
 
 #GLOBAL VARIABLES
@@ -30,9 +32,9 @@ INIT_WEIGHT = False
 CUMULATIVE = True
 TOP_N_CONSTRIANTS = 60
 N_SAMPLES = 25
-VARIANCE = 0.1
+VARIANCE = 0.08
 STEP_SIZE = 0.01
-BRANCHES = 5
+BRANCHES = args.branches
 NOVELTY_SLACK = 0
 
 
