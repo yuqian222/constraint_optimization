@@ -24,6 +24,8 @@ parser.add_argument('--env', type=str, default='HalfCheetah-v2',
                     help='enviornment (default: HalfCheetah-v2)')
 parser.add_argument('--branches', type=int, default=5, metavar='N',
                     help='branches per round (default: 5)')
+parser.add_argument('--iter_steps', type=int, default=20000, metavar='N',
+                    help='num steps per iteration (default: 20,000)')
 args = parser.parse_args()
 
 #GLOBAL VARIABLES
@@ -36,6 +38,7 @@ VARIANCE = 0.08
 STEP_SIZE = 0.01
 BRANCHES = args.branches
 NOVELTY_SLACK = 0
+MAX_STEPS = args.iter_steps
 
 
 def select_action(state, policy, variance=0.1, record=True):
@@ -106,13 +109,13 @@ def main():
         explore_episodes = 0
         explore_rew =0
 
-        while num_steps < 25000:
+        while num_steps < MAX_STEPS:
             state = env.reset()
             for t in range(1000): # Don't infinite loop while learning
-                if num_steps < 10000:
+                if num_steps < MAX_STEPS*0.4:
                     action = select_action(state, sample_policy, variance=VARIANCE)
                     name_str = "expl_var" #explore
-                elif num_steps < 20000:
+                elif num_steps < MAX_STEPS*0.4:
                     action = select_action(state, sample_policy, variance=VARIANCE)
                     new_a = q_function.calculate_action_grad(torch.Tensor(state), torch.Tensor(action), step_size=STEP_SIZE)
                     action = tuple(new_a.detach().numpy())
