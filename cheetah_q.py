@@ -28,9 +28,9 @@ args = parser.parse_args()
 ENV = 'HalfCheetah-v2'
 INIT_WEIGHT = False
 CUMULATIVE = True
-TOP_N_CONSTRIANTS = 50
+TOP_N_CONSTRIANTS = 60
 N_SAMPLES = 25
-VARIANCE = 0.3
+VARIANCE = 0.1
 STEP_SIZE = 0.01
 BRANCHES = 5
 NOVELTY_SLACK = 0
@@ -82,6 +82,9 @@ def main():
     env.seed(args.seed)
     torch.manual_seed(args.seed)
 
+    # just to make more robust for 
+    N_SAMPLES = env.observation_space.shape[0]+2
+
     q_function = Value(env.observation_space.shape[0] + env.action_space.shape[0], num_hidden=64)
     Policy = Policy_lin
   
@@ -99,7 +102,7 @@ def main():
         num_steps = 0
         explore_episodes = 0
         explore_rew =0
-        my_states = {}
+
         while num_steps < 25000:
             state = env.reset()
             for t in range(1000): # Don't infinite loop while learning
@@ -144,11 +147,6 @@ def main():
         best_tuples = best_state_actions(states, action_grad, rewards, info, top_n_constraints=TOP_N_CONSTRIANTS)
 
 
-        #print(rewards[:10])
-        #print(actions[:10])
-        #print(action_grad[:10])
-
-
         sample_policy.clean()
 
         # sample and solve
@@ -158,7 +156,7 @@ def main():
 
         for branch in range(BRANCHES):
             
-            branch_policy = copy.deepcopy(sample_policy)
+            branch_policy = Policy(env.observation_space.shape[0], env.action_space.shape[0])
             
             constraints = random.sample(best_tuples, N_SAMPLES)
 
@@ -168,7 +166,7 @@ def main():
             print("constraint set's episode and step number:")
             print(info)
 
-            branch_policy.train(states,actions, epoch=500)
+            branch_policy.train(states,actions, epoch=1000)
 
             # Evaluate
             num_steps = 0
@@ -202,6 +200,7 @@ def main():
                     
             if eval_rew > max_eval:
                 print("updated to this policy")
+                print(max_policy.affine1)
                 max_eval, max_policy, max_set = eval_rew, branch_policy, constraints
             
         # the end of branching
@@ -211,7 +210,6 @@ def main():
 
             with open("%s/%d_policy.p"%(dir_name,i_episode), 'wb') as out:
                 pickle.dump(max_policy, out)
-
 
             sample_policy, sample_eval = max_policy, max_eval
         
