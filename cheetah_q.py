@@ -119,7 +119,7 @@ def main():
                     action = select_action(state, sample_policy, variance=VARIANCE)
                     name_str = "expl_var" #explore
                 elif num_steps < MAX_STEPS*0.35:
-                    action = select_action(state, sample_policy, variance=VARIANCE)
+                    action = select_action(state, sample_policy, variance=0)
                     new_a = q_function.calculate_action_grad(torch.Tensor(state), torch.Tensor(action), step_size=STEP_SIZE)
                     action = tuple(new_a.detach().numpy())
                     name_str = "expl_grad" #explore
