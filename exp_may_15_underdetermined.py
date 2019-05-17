@@ -12,6 +12,8 @@ from torch.autograd import Variable
 from torch.distributions import Categorical, Bernoulli
 from policies import *
 
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+print('Using device:', device)
 
 parser = argparse.ArgumentParser(description='cheetah_q parser')
 parser.add_argument('--gamma', type=float, default=0.9, metavar='G',
@@ -33,6 +35,8 @@ parser.add_argument('--iter_steps', type=int, default=20000, metavar='N',
 
 parser.add_argument('--var', type=float, default=0.1,
                     help='sample variance (default: 0.1)')
+parser.add_argument('--hidden_size', type=int, default=24,
+                    help='hidden size of policy nn (default: 24)')
 args = parser.parse_args()
 
 #GLOBAL VARIABLES
@@ -46,13 +50,14 @@ STEP_SIZE = 0.01
 BRANCHES = args.branches
 POLICY = args.policy
 MAX_STEPS = args.iter_steps
+HIDDEN_SIZE = args.hidden_size
 
 
 def select_action(state, policy, variance=0.1, record=True):
 
     new_state = torch.from_numpy(state).unsqueeze(0)
-    action = policy(new_state.float())
-    action = action.data[0].numpy()
+    action = policy(new_state.float().to(device))
+    action = action.data[0].cpu().numpy()
     action = np.random.normal(action, [variance]*len(action))
 
     if record:
@@ -93,6 +98,8 @@ def main():
     env = gym.make(ENV)
     env.seed(args.seed)
     torch.manual_seed(args.seed)
+    num_hidden = HIDDEN_SIZE
+    var = VARIANCE
 
     # just to make more robust for differnet envs
     if POLICY == "linear":
@@ -100,16 +107,17 @@ def main():
         TOP_N_CONSTRIANTS = N_SAMPLES*2
         Policy = Policy_lin
     elif POLICY == "nn": #assume it's 2 layer here
-        N_SAMPLES = env.observation_space.shape[0] * 2 
-        TOP_N_CONSTRIANTS = N_SAMPLES*2
+        N_SAMPLES = int(env.observation_space.shape[0] * (num_hidden+1)-2) #a little underdetermined
+        TOP_N_CONSTRIANTS = int(N_SAMPLES*1.5)
         Policy = Policy_quad
         
 
-    q_function = Value(env.observation_space.shape[0] + env.action_space.shape[0], num_hidden=64)
+    #q_function = Value(env.observation_space.shape[0] + env.action_space.shape[0], num_hidden=64)
     
   
     sample_policy, sample_eval = Policy(env.observation_space.shape[0], 
-                                            env.action_space.shape[0]), -1700
+                                            env.action_space.shape[0], num_hidden=num_hidden), -1700
+    sample_policy = sample_policy.to(device)
 
     if INIT_WEIGHT:
         sample_eval = 1300
@@ -117,7 +125,14 @@ def main():
             params=pickle.load(f)
             sample_policy.init_weight(params)
 
+    ep_no_improvement = 0
+
     for i_episode in count(1):
+
+        # hack
+        if ep_no_improvement > 10:
+            var = var/2 
+
         # Exploration
         num_steps = 0
         explore_episodes = 0
@@ -126,7 +141,7 @@ def main():
         while num_steps < MAX_STEPS:
             state = env.reset()
             for t in range(1000): # Don't infinite loop while learning
-                action = select_action(state, sample_policy, variance=VARIANCE)
+                action = select_action(state, sample_policy, variance=var)
                 name_str = "expl_var" #explore
                 '''
                 if num_steps < MAX_STEPS*0.35:
@@ -159,7 +174,7 @@ def main():
 
 
         states, actions, rewards, info = calculate_rewards(explore_episodes, sample_policy)
-        input_tensor = torch.cat((torch.Tensor(states), torch.Tensor(actions)),1)
+        #input_tensor = torch.cat((torch.Tensor(states), torch.Tensor(actions)),1)
         
         #q_function.train(input_tensor, rewards, epoch=10)
         '''
@@ -180,17 +195,17 @@ def main():
 
         for branch in range(BRANCHES):
             
-            branch_policy = Policy(env.observation_space.shape[0], env.action_space.shape[0])
+            branch_policy = Policy(env.observation_space.shape[0], env.action_space.shape[0]).to(device)
             
             constraints = random.sample(best_tuples, N_SAMPLES)
 
             # Get metadata of constraints
             states, actions, rewards, info = zip(*constraints)
             print("ep %d b %d: constraint mean: %.3f  std: %.3f  max: %.3f" % (i_episode, branch, np.mean(rewards), np.std(rewards), max(rewards)))
-            print("constraint set's episode and step number:")
-            print(info)
+            #print("constraint set's episode and step number:")
+            #print(info)
 
-            branch_policy.train(states,actions, epoch=1000)
+            branch_policy.train(torch.tensor(states).to(device),torch.tensor(actions).to(device), epoch=300)
 
             # Evaluate
             num_steps = 0
@@ -236,6 +251,9 @@ def main():
                 pickle.dump(max_policy, out)
 
             sample_policy, sample_eval = max_policy, max_eval
+            ep_no_improvement = 0
+        else:
+            ep_no_improvement +=1
         
 
 def all_l2_norm(constraints):

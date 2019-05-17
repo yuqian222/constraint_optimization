@@ -154,9 +154,7 @@ class Policy_lin(nn.Module):
 
 class Policy_quad(nn.Module):
     def __init__(self, num_inputs, num_outputs, num_hidden=24, initialize = True):
-        super(Policy_lin, self).__init__()
-        self.var_bound = var_bound
-        self.slack_bound = slack_bound
+        super(Policy_quad, self).__init__()
 
         self.affine1 = nn.Linear(num_inputs, num_hidden)
         self.affine2 = nn.Linear(num_hidden, num_outputs)
@@ -219,8 +217,8 @@ class Policy_quad(nn.Module):
 
 class value_dataset(Dataset):
     def __init__(self, x, y):
-        self.x = Variable(torch.Tensor(x))
-        self.y = Variable(torch.Tensor(y))
+        self.x = Variable(x)
+        self.y = Variable(y)
         assert(len(x) == len(y))
     def  __len__(self):
         return self.x.shape[0]
