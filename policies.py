@@ -10,7 +10,7 @@ import torch.optim as optim
 from torch.utils.data import Dataset,DataLoader
 from torch.autograd import Variable
 from torch.distributions import Categorical, Bernoulli
-from gurobipy import *
+#from gurobipy import *
 
 class Policy_lin(nn.Module):
     def __init__(self, num_inputs, num_outputs, var_bound=1.0, slack_bound=0.01, initialize = True):
@@ -41,6 +41,8 @@ class Policy_lin(nn.Module):
                 self.affine1.weight.data[neuron_idx][prev_neuron_idx] = dic[(neuron_idx,prev_neuron_idx)]
     
     def forward(self, x):
+        if isinstance(x, np.ndarray):
+            x = torch.tensor(x)
         action = self.affine1(x)
         return action
 
@@ -181,6 +183,8 @@ class Policy_quad(nn.Module):
                 self.affine1.weight.data[neuron_idx][prev_neuron_idx] = dic[(neuron_idx,prev_neuron_idx)]
     
     def forward(self, x):
+        if isinstance(x, np.ndarray):
+            x = torch.tensor(x)
         x = torch.tanh(self.affine1(x))
         action = torch.tanh(self.affine2(x))
         return action
