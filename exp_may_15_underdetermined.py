@@ -1,4 +1,4 @@
-import argparse, gym, copy, math, pickle, torch, random, json, copy
+import argparse, gym, copy, math, pickle, torch, random, json, os
 import numpy as np
 from itertools import count
 from heapq import nlargest
@@ -107,7 +107,7 @@ def main():
         TOP_N_CONSTRIANTS = N_SAMPLES*2
         Policy = Policy_lin
     elif POLICY == "nn": #assume it's 2 layer here
-        N_SAMPLES = int(env.observation_space.shape[0] * (num_hidden+1)-2) #a little underdetermined
+        N_SAMPLES = int(env.observation_space.shape[0] * (num_hidden) *0.5) #a little underdetermined
         TOP_N_CONSTRIANTS = int(N_SAMPLES*1.5)
         Policy = Policy_quad
         
