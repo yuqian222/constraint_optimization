@@ -36,7 +36,7 @@ parser.add_argument('--branches', type=int, default=5, metavar='N',
 parser.add_argument('--iter_steps', type=int, default=20000, metavar='N',
                     help='num steps per iteration (default: 20,000)')
 
-parser.add_argument('--var', type=float, default=0.1,
+parser.add_argument('--var', type=float, default=0.05,
                     help='sample variance (default: 0.1)')
 parser.add_argument('--hidden_size', type=int, default=24,
                     help='hidden size of policy nn (default: 24)')
@@ -48,7 +48,7 @@ INIT_WEIGHT = False
 CUMULATIVE = True
 TOP_N_CONSTRIANTS = 60
 N_SAMPLES = 25
-VARIANCE = 0.08
+VARIANCE = args.var
 STEP_SIZE = 0.01
 BRANCHES = args.branches
 POLICY = args.policy
@@ -115,13 +115,10 @@ def main():
         LOW_REW_SET = N_SAMPLES
         TOP_N_CONSTRIANTS = int(N_SAMPLES*1.5)
         Policy = Policy_quad
-        
-
-    #q_function = Value(env.observation_space.shape[0] + env.action_space.shape[0], num_hidden=64)
-    
+            
   
     sample_policy, sample_eval = Policy(env.observation_space.shape[0], 
-                                            env.action_space.shape[0], num_hidden=num_hidden), -1700
+                                        env.action_space.shape[0], num_hidden=num_hidden), -1700
     sample_policy = sample_policy.to(device)
 
     if INIT_WEIGHT:
@@ -135,8 +132,9 @@ def main():
     for i_episode in count(1):
 
         # hack
-        if ep_no_improvement > 20:
-            var = var/2 
+        if ep_no_improvement > 10:
+            N_SAMPLES = int(N_SAMPLES * 1.5)
+            var = var/2
 
         # -------------------------------------------------------
         # bad state correction 
@@ -226,17 +224,19 @@ def main():
         for branch in range(BRANCHES):
             
             branch_policy = Policy(env.observation_space.shape[0], env.action_space.shape[0]).to(device)
-            
+            '''
             if len(low_rew_constraints_set) > N_SAMPLES/2:
-                corrective_constraitns = random.sample(low_rew_constraints_set, int(N_SAMPLES/2))
+                corrective_constraints = random.sample(low_rew_constraints_set, int(N_SAMPLES/2))
             else:
-                corrective_constraitns = low_rew_constraints_set
+                corrective_constraints = low_rew_constraints_set
             
-            constraints = random.sample(best_tuples, N_SAMPLES-len(corrective_constraitns)) + corrective_constraitns
+            constraints = random.sample(best_tuples, N_SAMPLES-len(corrective_constraints)) + corrective_constraints
+            '''
 
+            constraints = random.sample(best_tuples, N_SAMPLES) + low_rew_constraints_set
             # Get metadata of constraints
             states, actions, rewards, info = zip(*constraints)
-            print("ep %d b %d: constraint mean: %.3f  std: %.3f  max: %.3f" % (i_episode, branch, np.mean(rewards), np.std(rewards), max(rewards)))
+            print("ep %d b %d: %d constraints mean: %.3f  std: %.3f  max: %.3f" % ( i_episode, branch, len(constraints), np.mean(rewards), np.std(rewards), max(rewards)))
             #print("constraint set's episode and step number:")
             #print(info)
 

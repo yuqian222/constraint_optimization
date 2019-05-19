@@ -159,7 +159,8 @@ class Policy_quad(nn.Module):
         super(Policy_quad, self).__init__()
 
         self.affine1 = nn.Linear(num_inputs, num_hidden)
-        self.affine2 = nn.Linear(num_hidden, num_outputs)
+        self.affine2 = nn.Linear(num_hidden, num_hidden)
+        self.affine3 = nn.Linear(num_hidden, num_outputs)
 
         if initialize:
             self.random_initialize()
@@ -168,23 +169,25 @@ class Policy_quad(nn.Module):
         self.saved_state = []
         self.rewards = []
 
-        self.optimizer = optim.RMSprop(self.parameters(),  lr=1e-3)
+        self.optimizer = optim.RMSprop(self.parameters(), weight_decay=0.001)
         self.criterion = nn.MSELoss()
 
     def random_initialize(self):
-        for l in [self.affine1, self.affine2]:
-            nn.init.uniform_(l.weight.data, a=-0.1, b=0.1)
+        for l in [self.affine1, self.affine2, self.affine3]:
+            torch.nn.init.xavier_uniform(l.weight)
             nn.init.uniform_(l.bias.data, 0.0)
 
     def init_weight(self, dic):
         for neuron_idx in range(self.affine1.weight.size(0)):
+
             self.affine1.bias.data[neuron_idx] = dic[("bias",neuron_idx)]
             for prev_neuron_idx in range(self.affine1.weight.size(1)):
                 self.affine1.weight.data[neuron_idx][prev_neuron_idx] = dic[(neuron_idx,prev_neuron_idx)]
     
     def forward(self, x):
         x = torch.tanh(self.affine1(x))
-        action = self.affine2(x)
+        x = torch.tanh(self.affine2(x))
+        action = self.affine3(x)
         return action
     
 
@@ -202,16 +205,6 @@ class Policy_quad(nn.Module):
                 running_loss.append(loss.item())
             if epoch % 100 == 0:
                 print("Policy trianing: epoch %d, loss = %.3f" %(epoch, sum(running_loss)/len(running_loss)))
-
-    def train_Q(self, states, Q, epoch = 3):
-        for ep in range(epoch):
-            actions = self(states)
-            loss = -Q(torch.cat((states,actions), dim=1)).sum()
-            self.optimizer.zero_grad()
-            loss.backward()
-            self.optimizer.step()
-            print("policy trianing: epoch %d, loss = %.3f" %(ep, loss.item()))
-
     def clean(self):
         del self.saved_state[:]
         del self.saved_action[:]
