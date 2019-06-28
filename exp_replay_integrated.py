@@ -84,7 +84,7 @@ def calculate_rewards(myround, policy):
             if step == 0:
                 R = 0
     else:
-        rewards = policy.rewards
+        rewards = deepcopy(policy.rewards)
     return policy.saved_state, policy.saved_action, rewards, info
 
 
@@ -115,8 +115,8 @@ def main():
         Policy = Policy_lin
     elif POLICY == "nn": #assume it's 2 layer here
         N_SAMPLES = int(env.observation_space.shape[0]*2) #(num_hidden) a little underdetermined
-        LOW_REW_SET = N_SAMPLES*3
-        TOP_N_CONSTRIANTS = int(N_SAMPLES*2)
+        LOW_REW_SET = N_SAMPLES*2
+        TOP_N_CONSTRIANTS = int(N_SAMPLES*1.5)
         Policy = Policy_quad
             
   
@@ -136,9 +136,10 @@ def main():
 
         # hack
         if ep_no_improvement > 3:
-            N_SAMPLES = int(N_SAMPLES * 1.2)
-            TOP_N_CONSTRIANTS = int(N_SAMPLES*2)
+            N_SAMPLES = int(N_SAMPLES * 1.5)
+            TOP_N_CONSTRIANTS = int(N_SAMPLES*1.5)
             var = var/2
+            print("Updated Var to: %.3f"%(var))
             ep_no_improvement = 0
 
 
@@ -219,7 +220,7 @@ def main():
             branch_policy = Policy(env.observation_space.shape[0], env.action_space.shape[0]).to(device)
 
             if len(low_rew_constraints_set) > N_SAMPLES/2:
-                corrective_constraints = random.sample(low_rew_constraints_set, int(N_SAMPLES/2))
+                corrective_constraints = low_rew_constraints_set[:int(N_SAMPLES/2)]
             else:
                 corrective_constraints = low_rew_constraints_set
             

@@ -5,3 +5,4 @@ gurobi.log
 filewk.lp
 .ipynb_checkpoints/*
 __pycache__/*
+gifs/*

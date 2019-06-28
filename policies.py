@@ -174,7 +174,7 @@ class Policy_quad(nn.Module):
 
     def random_initialize(self):
         for l in [self.affine1, self.affine2, self.affine3]:
-            torch.nn.init.xavier_uniform(l.weight)
+            torch.nn.init.xavier_uniform_(l.weight)
             nn.init.uniform_(l.bias.data, 0.0)
 
     def init_weight(self, dic):
@@ -185,8 +185,8 @@ class Policy_quad(nn.Module):
                 self.affine1.weight.data[neuron_idx][prev_neuron_idx] = dic[(neuron_idx,prev_neuron_idx)]
     
     def forward(self, x):
-        x = torch.tanh(self.affine1(x))
-        x = torch.tanh(self.affine2(x))
+        x = torch.relu(self.affine1(x))
+        x = torch.relu(self.affine2(x))
         action = self.affine3(x)
         return action
     

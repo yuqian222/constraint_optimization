@@ -40,6 +40,9 @@ parser.add_argument('--var', type=float, default=0.05,
                     help='sample variance (default: 0.1)')
 parser.add_argument('--hidden_size', type=int, default=24,
                     help='hidden size of policy nn (default: 24)')
+
+parser.add_argument('--training_epoch', type=int, default=500,
+                    help='Training epochs for each policy update (default: 500)')
 args = parser.parse_args()
 
 #GLOBAL VARIABLES
@@ -111,9 +114,9 @@ def main():
         TOP_N_CONSTRIANTS = N_SAMPLES*2
         Policy = Policy_lin
     elif POLICY == "nn": #assume it's 2 layer here
-        N_SAMPLES = int(env.observation_space.shape[0]) #(num_hidden) a little underdetermined
+        N_SAMPLES = int(env.observation_space.shape[0]*2) #(num_hidden) a little underdetermined
         LOW_REW_SET = N_SAMPLES
-        TOP_N_CONSTRIANTS = int(N_SAMPLES*1.5)
+        TOP_N_CONSTRIANTS = int(N_SAMPLES*2)
         Policy = Policy_quad
             
   
@@ -134,8 +137,8 @@ def main():
         # hack
         if ep_no_improvement > 3:
             N_SAMPLES = int(N_SAMPLES * 1.2)
-            TOP_N_CONSTRIANTS = int(N_SAMPLES*1.5)
-            var = var/1.5
+            TOP_N_CONSTRIANTS = int(N_SAMPLES*2)
+            var = var/2
             ep_no_improvement = 0
 
         # -------------------------------------------------------
@@ -153,7 +156,9 @@ def main():
             next_state, reward, done, _ = env.step(action)            
             sample_policy.rewards.append((reward, t, "first"))
 
-            if len(lowest_rew) < LOW_REW_SET:
+            if len(lowest_rew) < LOW_REW_SET or done:
+                if done:
+                    reward = 0
                 state_action_rew_env.append([state,action,reward,copied_env])
                 lowest_rew.append(reward)
             elif reward < max(lowest_rew):
@@ -167,17 +172,19 @@ def main():
             state = next_state
             copied_env = deepcopy(env)
 
-        print("finished first trajectory")
+        print("finished first trajectory, bad states") 
+        print(len(state_action_rew_env))
+
         # explore better actions
         low_rew_constraints_set = []
 
         for s, a, r, saved_env in state_action_rew_env:
             max_r, max_a = r, a
-            step_env = deepcopy(saved_env)
-            for i in range(15): #sample 10 different actions
+            for i in range(20): #sample 10 different actions
+                step_env = deepcopy(saved_env)
                 action_explore = select_action(s, sample_policy, variance=BAD_STATE_VAR, record=False)
-                _, reward, _, _ = step_env.step(action_explore)
-                if reward > max_r:
+                _, reward, done, _ = step_env.step(action_explore)
+                if reward > max_r and not done:
                     max_r, max_a = reward, action_explore
             if max_r > r:
                 low_rew_constraints_set.append((s, max_a, max_r, "bad_states"))
@@ -209,7 +216,7 @@ def main():
         
         explore_rew /= explore_episodes
 
-        print('\nEpisode {}\tExplore reward: {:.2f}\n'.format(i_episode, explore_rew))
+        print('\nEpisode {}\tExplore reward: {:.2f}\tAverage ep len: {:.1f}\n'.format(i_episode, explore_rew, num_steps/explore_episodes))
 
 
         states, actions, rewards, info = calculate_rewards(explore_episodes, sample_policy)
@@ -226,24 +233,22 @@ def main():
         for branch in range(BRANCHES):
             
             branch_policy = Policy(env.observation_space.shape[0], env.action_space.shape[0]).to(device)
-            '''
+
             if len(low_rew_constraints_set) > N_SAMPLES/2:
                 corrective_constraints = random.sample(low_rew_constraints_set, int(N_SAMPLES/2))
             else:
                 corrective_constraints = low_rew_constraints_set
             
             constraints = random.sample(best_tuples, N_SAMPLES-len(corrective_constraints)) + corrective_constraints
-            '''
 
-            constraints = random.sample(best_tuples, N_SAMPLES) + low_rew_constraints_set
+
+            #constraints = random.sample(best_tuples, N_SAMPLES) + low_rew_constraints_set
             # Get metadata of constraints
             states, actions, rewards, info = zip(*constraints)
             print("ep %d b %d: %d constraints mean: %.3f  std: %.3f  max: %.3f" % ( i_episode, branch, len(constraints), np.mean(rewards), np.std(rewards), max(rewards)))
-            #print("constraint set's episode and step number:")
-            #print(info)
-
+            print(info)
             branch_policy.train(torch.tensor(states).float().to(device),
-                                torch.tensor(actions).float().to(device), epoch=500)
+                                torch.tensor(actions).float().to(device), epoch=args.training_epoch)
 
             # Evaluate
             num_steps = 0
