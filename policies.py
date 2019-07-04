@@ -10,7 +10,6 @@ import torch.optim as optim
 from torch.utils.data import Dataset,DataLoader
 from torch.autograd import Variable
 from torch.distributions import Categorical, Bernoulli
-#from gurobipy import *
 
 class Policy_lin(nn.Module):
     def __init__(self, num_inputs, num_outputs, var_bound=1.0, slack_bound=0.01, initialize = True):
@@ -39,7 +38,7 @@ class Policy_lin(nn.Module):
             self.affine1.bias.data[neuron_idx] = dic[("bias",neuron_idx)]
             for prev_neuron_idx in range(self.affine1.weight.size(1)):
                 self.affine1.weight.data[neuron_idx][prev_neuron_idx] = dic[(neuron_idx,prev_neuron_idx)]
-    
+
     def forward(self, x):
         if isinstance(x, np.ndarray):
             x = torch.tensor(x)
@@ -154,13 +153,16 @@ class Policy_lin(nn.Module):
         del self.rewards[:]
 
 
+# juice
 class Policy_quad(nn.Module):
-    def __init__(self, num_inputs, num_outputs, num_hidden=24, initialize = True):
+    def __init__(self, num_inputs, num_outputs, noise, expl_noise=0.3, num_hidden=24, initialize = True):
         super(Policy_quad, self).__init__()
 
         self.affine1 = nn.Linear(num_inputs, num_hidden)
         self.affine2 = nn.Linear(num_hidden, num_hidden)
         self.affine3 = nn.Linear(num_hidden, num_outputs)
+        self.noise = noise
+        self.explore_noise = expl_noise
 
         if initialize:
             self.random_initialize()
@@ -183,11 +185,24 @@ class Policy_quad(nn.Module):
             self.affine1.bias.data[neuron_idx] = dic[("bias",neuron_idx)]
             for prev_neuron_idx in range(self.affine1.weight.size(1)):
                 self.affine1.weight.data[neuron_idx][prev_neuron_idx] = dic[(neuron_idx,prev_neuron_idx)]
-    
-    def forward(self, x):
+
+    def gaussian(self, ins, is_training, explore):
+        if explore:
+            noise = Variable(ins.data.new(ins.size()).normal_(0, self.explore_noise))
+            return ins + noise
+        elif is_training:
+            noise = Variable(ins.data.new(ins.size()).normal_(0, self.noise))
+            return ins + noise
+        return ins
+
+    def set_noise(self, noise):
+        self.noise = noise
+
+    def forward(self, x,  is_training=True, explore=False):
         x = torch.relu(self.affine1(x))
         x = torch.relu(self.affine2(x))
-        action = self.affine3(x)
+        x = self.affine3(x)
+        action =self.gaussian(x, is_training, explore)
         return action
     
 
@@ -268,6 +283,9 @@ class Value(nn.Module):
             return action
         return action + step
 
+
+
+
 class Policy_Q(nn.Module):
     def __init__(self, num_inputs, num_hidden, num_outputs, initialize = True):
         super(Policy_lin, self).__init__()
@@ -327,154 +345,4 @@ class Policy_Q(nn.Module):
             loss.backward()
             self.optimizer.step()
             print("policy trianing: epoch %d, loss = %.3f" %(ep, loss.item()))
-
-
-
-# trash
-class Policy_relu(nn.Module):
-    def __init__(self, num_inputs, num_outputs,  var_bound, slack_bound, num_hidden=24, initialize = True):
-        super(Policy_relu, self).__init__()
-
-        self.var_bound = var_bound
-        self.slack_bound = slack_bound
-
-        self.affine1 = nn.Linear(num_inputs, num_hidden)
-        self.affine2 = nn.Linear(num_hidden, num_outputs)
-        self.layers = [self.affine1, self.affine2]
-
-        if initialize:
-            self.random_initialize()
-
-        self.saved_action = []
-        self.saved_state = []
-        self.rewards = []
-
-    def random_initialize(self):
-        nn.init.uniform_(self.affine1.weight.data, a=-0.1, b=0.1)
-        nn.init.uniform_(self.affine1.bias.data, 0.0)
-        nn.init.uniform_(self.affine2.weight.data, a=-0.1, b=0.1)
-        nn.init.uniform_(self.affine2.bias.data, 0.0)
-
-    def forward(self, x):
-        x = torch.relu(self.affine1(x))
-        action = self.affine2(x)
-        return action
-
-    def updateParam(self, prob, print_results=False):
-        result = []
-        result_name = []
-        print ("Update parameter")
-        for v in prob.getVars():
-            result.append(v.x)
-            result_name.append(v.varName)
-
-        indices = 0
-        for layer in self.layers:
-            for neuron_idx in range(layer.weight.size(0)):
-                for prev_neuron_idx in range(layer.weight.size(1)):
-                    layer.weight.data[neuron_idx][prev_neuron_idx] = result[indices]
-                    indices += 1
-            for idx in range(layer.bias.size(0)):
-                layer.bias.data[idx] = result[indices]
-                indices +=1
-
-    def initializeLimits(self, prob):
-        params = []
-        biases = []
-
-        for i, layer in enumerate(self.layers):
-            param = {}
-            bias  = []
-            for neuron_idx in range(layer.weight.size(0)):
-                for prev_neuron_idx in range(layer.weight.size(1)): #4
-                    coeff = "%d_w_%d_%d" %(i, neuron_idx, prev_neuron_idx)
-                    var = prob.addVar(lb=-self.var_bound, ub=self.var_bound, vtype=GRB.CONTINUOUS, name=coeff)
-                    param[(neuron_idx, prev_neuron_idx)] = var
-            for idx in range(layer.bias.size(0)):
-                bi = prob.addVar(lb=-self.var_bound, ub=self.var_bound, vtype=GRB.CONTINUOUS, name="%d_b_%d"%(i,neuron_idx))
-                bias.append(bi)
-
-            params.append(param)
-            biases.append(bias)
-
-        x_pos = [] #variables for hidden state neuron values
-        x_neg = []
-
-        # the relu implementation references
-        # Deep Neural Networks as 0-1 MILP: A Feasibility Study
-        # https://arxiv.org/pdf/1712.06174.pdf
-        for i, layer in enumerate(self.layers[:-1]):
-            xi, si = [], []
-            for idx in range(layer.weight.size(0)):
-                xj = prob.addVar(lb=0, vtype=GRB.CONTINUOUS, name="%d_x_%d"%(i, idx)) #positive part
-                sj = prob.addVar(lb=0, vtype=GRB.CONTINUOUS, name="%d_s_%d"%(i, idx)) #negative part
-                '''
-                # at least 1 of x and s is zero 
-                zj = prob.addVar(lb=0, ub=1, vtype=GRB.BINARY, name="%d_z_%d"%(i, idx))
-                prob.addConstr((zj == 1) >> (xj <= 0))
-                prob.addConstr((zj == 0) >> (sj <= 0))
-                '''
-                xi.append(xj)
-                si.append(sj)
-            
-            x_pos.append(xi)
-            x_neg.append(si)
-
-        return params, biases, x_pos, x_neg
-
-    def solve(self, constraints_dict):
-        
-        prob = Model("mip1")
-        params, biases, x_pos, x_neg = self.initializeLimits(prob)
-
-        formulas = []
-        s_actions = 0
-        count = 0
-        slack_vars = []
-
-        for state, action_dict in constraints_dict.items():
-            action = list(action_dict)[0]
-            
-            input_vec = list(state)
-            fianl_layer_exprs = []
-
-            for i, layer in enumerate(self.layers):
-                
-                output=[]
-
-                for neuron_idx in range(layer.weight.size(0)): # 0, 1
-                    lin_expr = QuadExpr(biases[i][neuron_idx])
-                    for prev_neuron_idx in range(0,layer.weight.size(1)): # 4
-                        var = params[i][(neuron_idx, prev_neuron_idx)]
-                        lin_expr = lin_expr + input_vec[prev_neuron_idx]*var
-
-                    if i < len(x_pos):
-                        prob.addConstr(lin_expr == x_pos[i][neuron_idx] )
-                        prob.addConstr(x_neg[i][neuron_idx] == max_(x_pos[i][neuron_idx], 0))
-                        output.append(x_neg[i][neuron_idx])
-                    else:
-                        fianl_layer_exprs.append(lin_expr)
-
-                input_vec=output
-           
-            for index, exp in enumerate(fianl_layer_exprs):
-                slack = prob.addVar(lb=-self.slack_bound, ub=self.slack_bound, vtype=GRB.CONTINUOUS)
-                slack_vars.append(slack)
-                prob.addConstr((exp - action[index] <= slack))
-                prob.addConstr((action[index] - exp <= slack)) #workaround for quadratic equality constraint
-                count += 1
-        # objective that minimizes sum of slack variables
-        obj = 0
-        for e in slack_vars:
-            obj += e*e 
-
-        prob.setObjective(obj, GRB.MINIMIZE)
-
-        print ("Number of constraints are ", count)
-        if (count == 0):
-            return (prob, 0)
-        prob.optimize()
-        return (prob, 1)
-
-
 
