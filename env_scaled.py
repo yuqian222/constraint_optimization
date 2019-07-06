@@ -63,6 +63,10 @@ HIDDEN_SIZE = args.hidden_size
 LOW_REW_SET = 20
 BAD_STATE_VAR = 0.3
 
+# number of trajectories for evaluation
+SAMPLE_TRAJ = 20
+EVAL_TRAJ = 20
+
 def select_action(state, policy, is_training, record=True):
     with torch.no_grad():
         if isinstance(state, np.ndarray):
@@ -78,7 +82,7 @@ def select_action(state, policy, is_training, record=True):
 
     return action
 
-def calculate_rewards(myround, policy):
+def calculate_rewards(policy):
     R = 0
     rewards = []
     info = []
@@ -116,7 +120,7 @@ def make_env(env, seed):
 
 def main():
 
-    dir_name = "results/%s/%s"%(ENV, strftime("%m_%d_%H_%M", gmtime()))
+    dir_name = "results/%s/%s-%s"%(ENV, "scaling",strftime("%m_%d_%H_%M", gmtime()))
     os.makedirs(dir_name, exist_ok=True)
     logfile = open(dir_name+"/log.txt", "w")
 
@@ -225,12 +229,10 @@ def main():
             if max_r - r >= 0.1:
                 low_rew_constraints_set.append((s, max_a, max_r, "bad_states"))
                 print("improved bad state from %.3f to %.3f" %(r, max_r))
-                #print(a)
-                #print(max_a)
             if len(low_rew_constraints_set) > N_SAMPLES/3:
                 break #enough bad correction constraints
 
-        states, actions, rewards, info = calculate_rewards(explore_episodes, sample_policy)
+        states, actions, rewards, info = calculate_rewards(sample_policy)
 
         best_tuples = best_state_actions(states, actions, rewards, info, top_n_constraints=TOP_N_CONSTRIANTS)
         sample_policy.clean()
@@ -243,13 +245,13 @@ def main():
         for branch in range(BRANCHES):
 
             branch_policy = make_policy()
-
+            '''
             if len(low_rew_constraints_set) > N_SAMPLES/2:
                 corrective_constraints = low_rew_constraints_set[:int(N_SAMPLES/2)]
             else:
                 corrective_constraints = low_rew_constraints_set
-
-            constraints = random.sample(best_tuples, N_SAMPLES-len(corrective_constraints)) + corrective_constraints
+            '''
+            constraints = random.sample(best_tuples+low_rew_constraints_set, N_SAMPLES)
             print(all_l2_norm(constraints)[:5])
             count_steps(constraints)
 
@@ -261,25 +263,19 @@ def main():
                                 torch.cat(actions).to(device), epoch=args.training_epoch)
 
             # Evaluate
-            num_steps = 0
-            eval_episodes = 0
             eval_rew = 0
-            while num_steps < 10000:
-                state = env.reset()
-                eval_sum = 0
-                for t in range(10000): # Don't infinite loop while learning
+            for i in range(EVAL_TRAJ):
+                state, done = env.reset(), False
+                while not done: # Don't infinite loop while learning
                     action = select_action(state, branch_policy, is_training=False)
                     state, reward, done, _ = env.step(action)
                     eval_rew += reward
-                    branch_policy.rewards.append((reward, t, "%s_%d"%(name_str, explore_episodes)))
-
                     if args.render:
                         env.render()
                     if done:
                         break
-                num_steps += (t-1)
-                eval_episodes += 1
-            eval_rew /= eval_episodes
+
+            eval_rew /= EVAL_TRAJ
             eval_rew = eval_rew.detach().numpy()[0][0]
 
             branch_policy.clean()
@@ -318,7 +314,7 @@ def all_l2_norm(constraints):
         for x2 in states[i+1:]:
             d=np.linalg.norm(np.subtract(x1,x2))
             if d - 0 < 1e-2:
-                print("0 dist at state %s with action %s and %s" %(str(x1), str(list(constraints[x1].keys())[0]),str(list(constraints[x2].keys())[0])))
+                print("0 dist!!")
             all_dist.append(d)
     return sorted(all_dist)
 

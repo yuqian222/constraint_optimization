@@ -44,7 +44,7 @@ ENV = args.env
 INIT_WEIGHT = False
 CUMULATIVE = True
 TOP_N_CONSTRIANTS = 60
-N_SAMPLES = 25
+N_SAMPLES = 20
 VARIANCE = 0.08
 STEP_SIZE = 0.01
 BRANCHES = args.branches
@@ -107,9 +107,9 @@ def main():
         TOP_N_CONSTRIANTS = N_SAMPLES*2
         Policy = Policy_lin
     elif POLICY == "nn": #assume it's 2 layer here
-        N_SAMPLES = int(env.observation_space.shape[0] * (num_hidden) *0.5) #a little underdetermined
+        N_SAMPLES = int(env.observation_space.shape[0] *1.5) #a little underdetermined #* (num_hidden)
         TOP_N_CONSTRIANTS = int(N_SAMPLES*1.5)
-        Policy = Policy_quad
+        Policy = Policy_quad_nonoise
         
 
     #q_function = Value(env.observation_space.shape[0] + env.action_space.shape[0], num_hidden=64)
@@ -203,7 +203,7 @@ def main():
             states, actions, rewards, info = zip(*constraints)
             print("ep %d b %d: constraint mean: %.3f  std: %.3f  max: %.3f" % (i_episode, branch, np.mean(rewards), np.std(rewards), max(rewards)))
             #print("constraint set's episode and step number:")
-            #print(info)
+            print(info)
 
             branch_policy.train(torch.tensor(states).to(device),torch.tensor(actions).to(device), epoch=300)
 

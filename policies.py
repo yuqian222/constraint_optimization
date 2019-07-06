@@ -176,7 +176,7 @@ class Policy_quad(nn.Module):
 
     def random_initialize(self):
         for l in [self.affine1, self.affine2, self.affine3]:
-            torch.nn.init.xavier_uniform_(l.weight)
+            torch.nn.init.uniform_(l.weight, -0.1, 0.1)
             nn.init.uniform_(l.bias.data, 0.0)
 
     def init_weight(self, dic):
@@ -224,6 +224,14 @@ class Policy_quad(nn.Module):
         del self.saved_state[:]
         del self.saved_action[:]
         del self.rewards[:]
+
+
+
+class Policy_quad_nonoise(Policy_quad):
+    def __init__(self, num_inputs, num_outputs, num_hidden=24, initialize = True):
+        super(Policy_quad_nonoise, self).__init__(num_inputs, num_outputs, 0, num_hidden=num_hidden, initialize=initialize )
+
+
 
 class value_dataset(Dataset):
     def __init__(self, x, y):
