@@ -1,3 +1,5 @@
+#https://github.com/timdebruin/baselines-experience-selection/blob/master/baselines/ddpg/experience_selection_main.py
+
 import argparse, gym, copy, math, pickle, torch, random, json, os
 import numpy as np
 from itertools import count
@@ -25,7 +27,7 @@ parser.add_argument('--gamma', type=float, default=0.9, metavar='G',
                     help='discount factor (default: 0.99)')
 parser.add_argument('--seed', type=int, default=543, metavar='N',
                     help='random seed (default: 543)')
-parser.add_argument('--render', action='store_true', default=False,
+parser.add_argument('--render', action='store_true',
                     help='render the environment')
 parser.add_argument('--env', type=str, default='HalfCheetah-v2',
                     help='enviornment (default: HalfCheetah-v2)')
@@ -35,11 +37,11 @@ parser.add_argument('--policy', type=str, default="linear", #or can be nn
 
 parser.add_argument('--branches', type=int, default=5, metavar='N',
                     help='branches per round (default: 5)')
-parser.add_argument('--iter_steps', type=int, default=10000, metavar='N',
-                    help='num steps per iteration (default: 10,000)')
+parser.add_argument('--iter_steps', type=int, default=20000, metavar='N',
+                    help='num steps per iteration (default: 20,000)')
 
 parser.add_argument('--var', type=float, default=0.05,
-                    help='sample variance (default: 0.05)')
+                    help='sample variance (default: 0.1)')
 parser.add_argument('--hidden_size', type=int, default=24,
                     help='hidden size of policy nn (default: 24)')
 
@@ -65,7 +67,7 @@ BAD_STATE_VAR = 0.3
 SAMPLE_TRAJ = 20
 EVAL_TRAJ = 20
 
-def select_action(state, policy, is_training, record=True):
+def select_action(state, policy, is_training):
     with torch.no_grad():
         if isinstance(state, np.ndarray):
             new_state = torch.from_numpy(state).unsqueeze(0)
@@ -73,36 +75,7 @@ def select_action(state, policy, is_training, record=True):
             action = action.data[0].cpu().numpy()
         else:
             action = policy(state, is_training, (not record))
-
-        if record:
-            policy.saved_action.append(action)
-            policy.saved_state.append(state)
-
     return action
-
-def calculate_rewards(policy):
-    R = 0
-    rewards = []
-    info = []
-    if CUMULATIVE:
-        for (r,step,name) in policy.rewards[::-1]:
-            R = r + args.gamma * R
-            rewards.insert(0, R)
-            info.insert(0, (step,name))
-            if step == 0:
-                R = 0
-    else:
-        rewards = deepcopy(policy.rewards)
-    return policy.saved_state, policy.saved_action, rewards, info
-
-
-def best_state_actions(states, actions, rewards, info, top_n_constraints=-1):
-    if top_n_constraints > 0:
-        top_n = nlargest(top_n_constraints, zip(states, actions, rewards, info), key=lambda s: s[2])
-        return top_n
-    else:
-        return zip(states, actions, rewards, info)
-
 
 
 def main():
@@ -117,22 +90,21 @@ def main():
 
     num_hidden = HIDDEN_SIZE
 
-    # just to make more robust for differnet envs
-    if POLICY == "linear":
-        N_SAMPLES = env.observation_space.shape[0]
-        TOP_N_CONSTRIANTS = N_SAMPLES*2
-        Policy = Policy_lin
-    elif POLICY == "nn": #assume it's 2 layer here
-        N_SAMPLES = int(env.observation_space.shape[0]*2) #(num_hidden) a little underdetermined
-        LOW_REW_SET = N_SAMPLES*2
-        TOP_N_CONSTRIANTS = int(N_SAMPLES*1.5)
-        Policy = Policy_quad
+    N_SAMPLES = int(env.observation_space.shape[0]*2) #(num_hidden) a little underdetermined
+    LOW_REW_SET = N_SAMPLES*2
+    TOP_N_CONSTRIANTS = int(N_SAMPLES*1.5)
+    Policy = Policy_quad
 
 
     sample_policy, sample_eval = Policy(env.observation_space.shape[0],
                                         env.action_space.shape[0],
                                         noise=args.var,
                                         num_hidden=num_hidden).to(device), -1700
+    
+    actor_critic = Actor_critic(env.observation_space.shape[0],
+                                env.action_space.shape[0],
+                                sample_policy,
+                                device)
 
     if INIT_WEIGHT:
         sample_eval = 1300
@@ -168,16 +140,19 @@ def main():
         while num_steps < MAX_STEPS:
             state = env.reset()
 
+
             state_action_rew_env = []
             lowest_rew = []
 
             for t in range(1000): 
                 action = select_action(state, sample_policy, is_training=True)
                 name_str = "expl_var" #explore
+
                 copied_env = deepcopy(env)
                 next_state, reward, done, _ = env.step(action)
                 explore_rew += reward
-                sample_policy.rewards.append((reward, t, "%s_%d"%(name_str, explore_episodes)))
+                actor_critic.replay_buffer.push((state,next_state,action, reward, done, (name_str, explore_episodes))) 
+                #(state, next_state, action, reward, done, info)
 
                 if (ENV == "Hopper-v2" or ENV == "Walker2d-v2") and done:
                     reward = float('-inf')
@@ -209,7 +184,7 @@ def main():
             max_r, max_a = r, a
             for i in range(20): #sample 20 different actions
                 step_env = deepcopy(saved_env)
-                action_explore = select_action(s, sample_policy, is_training=True, record=False)
+                action_explore = select_action(s, actor_critic.actor, is_training=True, record=False)
                 _, reward, done, _ = step_env.step(action_explore)
                 if reward > max_r and not done:
                     max_r, max_a = reward, action_explore
@@ -219,14 +194,12 @@ def main():
             if len(low_rew_constraints_set) > N_SAMPLES/3:
                 break #enough bad correction constraints
 
-        states, actions, rewards, info = calculate_rewards(sample_policy)
-
-        best_tuples = best_state_actions(states, actions, rewards, info, top_n_constraints=TOP_N_CONSTRIANTS)
-        sample_policy.clean()
+        actor_critic.replay_buffer.calculate_advantage() #TODO
+        best_tuples = actor_critic.replay_buffer.best_state_actions(top_n_constraints=TOP_N_CONSTRIANTS)
 
         # sample and solve
 
-        max_policy, max_eval, max_set = sample_policy, sample_eval, best_tuples
+        max_policy, max_eval, max_set = actor_critic.actor, sample_eval, best_tuples
 
 
         for branch in range(BRANCHES):
@@ -288,7 +261,7 @@ def main():
                 policy_state_dict = OrderedDict({k:v.to('cpu') for k, v in max_policy.state_dict().items()})
                 pickle.dump(policy_state_dict, out)
 
-            sample_policy, sample_eval = max_policy, max_eval
+            actor_critic.actor, sample_eval = max_policy, max_eval
             ep_no_improvement = 0
         else:
             ep_no_improvement +=1
@@ -315,3 +288,6 @@ def count_steps(constriants):
 
 if __name__ == '__main__':
     main()
+
+
+

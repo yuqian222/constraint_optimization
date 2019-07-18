@@ -6,4 +6,7 @@ filewk.lp
 .ipynb_checkpoints/*
 .idea/*
 __pycache__/*
+*/__pycache__/*
 gifs/*
+*.pyc
+
