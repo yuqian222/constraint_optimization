@@ -85,11 +85,6 @@ class Policy_quad(nn.Module):
 
 
 
-class Policy_quad_nonoise(Policy_quad):
-    def __init__(self, num_inputs, num_outputs, num_hidden=24, initialize = True):
-        super(Policy_quad_nonoise, self).__init__(num_inputs, num_outputs, 0, num_hidden=num_hidden, initialize=initialize )
-
-
 
 class value_dataset(Dataset):
     def __init__(self, x, y):

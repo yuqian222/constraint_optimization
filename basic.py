@@ -33,7 +33,7 @@ parser.add_argument('--env', type=str, default='HalfCheetah-v2',
 parser.add_argument('--policy', type=str, default="nn", #or can be nn
                     help='policy trained. can be or linear or nn')
 
-parser.add_argument('--branches', type=int, default=5, metavar='N',
+parser.add_argument('--branches', type=int, default=10, metavar='N',
                     help='branches per round (default: 5)')
 parser.add_argument('--iter_steps', type=int, default=10000, metavar='N',
                     help='num steps per iteration (default: 10,000)')
@@ -51,8 +51,8 @@ args = parser.parse_args()
 ENV = args.env
 INIT_WEIGHT = False
 CUMULATIVE = True
-TOP_N_CONSTRIANTS = 60
-N_SAMPLES = 25
+TOP_N_CONSTRIANTS = 30
+N_SAMPLES = 15
 STEP_SIZE = 0.01
 BRANCHES = args.branches
 POLICY = args.policy
@@ -119,9 +119,8 @@ def main():
             N_SAMPLES = int(N_SAMPLES * 1.5)
             TOP_N_CONSTRIANTS = int(N_SAMPLES*1.5)
             VARIANCE = VARIANCE/1.5
-            print("Updated Var to: %.3f"%(sample_policy.noise))
+            print("Updated Var to: %.3f"%(VARIANCE))
             ep_no_improvement = 0
-
 
         # Exploration
         num_steps = 0

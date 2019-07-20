@@ -210,7 +210,6 @@ def main():
             '''
             constraints = random.sample(best_tuples+low_rew_constraints_set, N_SAMPLES)
             print(all_l2_norm(constraints)[:5])
-            count_steps(constraints)
 
             # Get metadata of constraints
             states, actions, info, rewards, _ = zip(*constraints)
@@ -277,8 +276,8 @@ def all_l2_norm(constraints):
     for i, x1 in enumerate(states):
         for x2 in states[i+1:]:
             d=np.linalg.norm(np.subtract(x1,x2))
-            if d - 0 < 1e-2:
-                print("0 dist!!")
+            #if d - 0 < 1e-2:
+            #    print("0 dist!!")
             all_dist.append(d)
     return sorted(all_dist)
 

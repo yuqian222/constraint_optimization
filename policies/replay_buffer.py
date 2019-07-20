@@ -62,7 +62,6 @@ class Replay_buffer():
                 candidate = zip(X, A, I, self.td_error, range(len(X)))
             else: # by rewards
                 rew = self.calculate_rewards()
-                print(list(zip(rew, D, [I[i][-1] for i in range(len(I))]))[900:1300])
                 candidate = zip(X, A, I, rew, range(len(X)))
 
             top_n = nlargest(top_n_constraints, candidate, key=lambda s: s[-2])

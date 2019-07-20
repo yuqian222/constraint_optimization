@@ -1,0 +1,9 @@
+Episode 1	Eval reward: -10595.39	Average reward: -10453.04
+Episode 2	Eval reward: -10624.08	Average reward: -10421.00
+
+Number of constraints are 180	
+Episode 3	Eval reward: -10455.94	Average reward: -10048.51
+Episode 4	Eval reward: -10259.37	Average reward: -10067.20
+
+Number of constraints are 180	
+Episode 5	Eval reward: -9800.01	Average reward: -9454.67

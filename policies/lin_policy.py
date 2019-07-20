@@ -45,6 +45,23 @@ class Policy_lin(nn.Module):
         action = self.affine1(x)
         return action
 
+
+    def select_action(self, state, variance=0.1):
+
+        new_state = torch.from_numpy(state).unsqueeze(0)
+        action = self.forward(new_state.float()).data[0].numpy()
+        action = np.random.normal(action, [variance]*len(action))
+        chunk_state = []
+        for i in range(len(state)):
+            chunk_state.append(round(state[i], 5))
+
+        chunk_state = tuple(chunk_state)
+
+        policy.saved_action.append(action)
+        policy.saved_state.append(chunk_state)
+        return action
+
+
     def updateParam(self, prob, print_results =False):
         result = []
         result_name = []

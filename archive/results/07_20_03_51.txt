@@ -1,0 +1,49 @@
+Episode 1	Eval reward: -280.45	Average reward: -604.60
+Episode 2	Eval reward: -273.08	Average reward: -624.09
+
+Number of constraints are 102	
+Episode 3	Eval reward: -257.85	Average reward: -574.54
+Episode 4	Eval reward: -289.73	Average reward: -556.05
+
+Number of constraints are 102	
+Episode 5	Eval reward: -269.14	Average reward: -550.25
+Episode 6	Eval reward: -239.11	Average reward: -537.02
+
+Number of constraints are 102	
+Episode 7	Eval reward: -266.17	Average reward: -589.62
+Episode 8	Eval reward: -264.02	Average reward: -580.04
+
+Number of constraints are 102	
+Episode 9	Eval reward: -254.04	Average reward: -598.28
+Episode 10	Eval reward: -261.90	Average reward: -574.51
+
+Number of constraints are 102	
+Episode 11	Eval reward: -248.53	Average reward: -571.79
+Episode 12	Eval reward: -258.21	Average reward: -584.39
+
+Number of constraints are 102	
+Episode 13	Eval reward: -246.76	Average reward: -561.06
+Episode 14	Eval reward: -257.53	Average reward: -590.96
+
+Number of constraints are 102	
+Episode 15	Eval reward: -399.55	Average reward: -694.14
+Episode 16	Eval reward: -354.63	Average reward: -668.97
+
+Number of constraints are 102	
+Episode 17	Eval reward: -322.90	Average reward: -642.71
+Episode 18	Eval reward: -352.53	Average reward: -640.06
+
+Number of constraints are 102	
+Episode 19	Eval reward: -402.33	Average reward: -615.21
+Episode 20	Eval reward: -363.75	Average reward: -650.70
+
+Number of constraints are 102	
+Episode 21	Eval reward: -328.29	Average reward: -638.03
+Episode 22	Eval reward: -359.70	Average reward: -661.78
+
+Number of constraints are 102	
+Episode 23	Eval reward: -382.41	Average reward: -660.43
+Episode 24	Eval reward: -372.22	Average reward: -652.25
+
+Number of constraints are 102	
+Episode 25	Eval reward: -379.06	Average reward: -684.99

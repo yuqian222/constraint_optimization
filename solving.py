@@ -20,24 +20,28 @@ parser.add_argument('--render', action='store_true',
                     help='render the environment')
 parser.add_argument('--log-interval', type=int, default=10, metavar='N',
                     help='interval between training status logs (default: 10)')
+parser.add_argument('--env', type=str, default='HalfCheetah-v2',
+                    help='enviornment (default: HalfCheetah-v2)')
 args = parser.parse_args()
 
 #GLOBAL VARIABLES
 INIT_WEIGHT = False
 VAR_BOUND = 1.0
 SLACK_BOUND = 0.5
-TOP_N_CONSTRIANTS = 30
-VARIANCE = 0.3
+VARIANCE = 0.2
 
-env = gym.make('HalfCheetah-v2')
+env = gym.make(args.env)
 env.seed(args.seed)
 torch.manual_seed(args.seed)
+
+TOP_N_CONSTRIANTS = 20 #env.observation_space.shape[0]
+
 
 class Policy(nn.Module):
     def __init__(self):
         super(Policy, self).__init__()
-        self.affine1 = nn.Linear(17, 6)
-
+        self.affine1 = nn.Linear(env.observation_space.shape[0], env.action_space.shape[0])
+        self.random_initialize()
         self.saved_action = []
         self.saved_state = []
         self.saved_log_probs = []
@@ -49,6 +53,10 @@ class Policy(nn.Module):
             self.affine1.bias.data[neuron_idx] = dic[("bias",neuron_idx)]
             for prev_neuron_idx in range(self.affine1.weight.size(1)):
                 self.affine1.weight.data[neuron_idx][prev_neuron_idx] = dic[(neuron_idx,prev_neuron_idx)]
+   
+    def random_initialize(self):
+        nn.init.uniform_(self.affine1.weight.data, a=-0.1, b=0.1)
+        nn.init.uniform_(self.affine1.bias.data, 0.0)
 
     def forward(self, x):
         # x = F.tanh(self.affine1(x))
@@ -85,15 +93,15 @@ def finish_episode(myround, my_states):
     R = 0
     rewards = []
     # calculate reward from the terminal state (add discount factor)
-    '''
+    
     # diminishing rewards
     for (r,step,name) in policy.rewards[::-1]:
         R = r + args.gamma * R
         rewards.insert(0, (R,step,name))
         if step == 0:
             R = 0
-    '''
-    rewards = policy.rewards
+    
+    #rewards = policy.rewards
     # update the state_reward dictionary
     for i in range(len(policy.saved_state)):
         chunk_state = policy.saved_state[i]
@@ -202,8 +210,8 @@ def updateParam(prob, policy_net):
         result.append(v.x)
         result_name.append(v.varName)
 
-    print(policy_net.affine1.weight)
-    print(result)
+    #print(policy_net.affine1.weight)
+    #print(result)
 
     indices = 0
     for neuron_idx in range(policy_net.affine1.weight.size(0)):
@@ -237,7 +245,7 @@ def main():
     initLimits = []
     timestr = strftime("%m_%d_%H_%M", gmtime())
     prob = Model("mip1")
-    f = open("results/"+timestr+".txt", "w")
+    f = open("results/solving/"+timestr+"_"+args.env+".txt", "w")
 
 
     (firstParam, firstBias) = initializeLimits(policy, initLimits, prob)
