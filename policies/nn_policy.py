@@ -13,14 +13,12 @@ from torch.distributions import Categorical, Bernoulli
 
 
 class Policy_quad(nn.Module):
-    def __init__(self, num_inputs, num_outputs, noise, expl_noise=0.3, num_hidden=24, initialize=True):
+    def __init__(self, num_inputs, num_outputs, num_hidden=24, initialize=True):
         super(Policy_quad, self).__init__()
 
         self.affine1 = nn.Linear(num_inputs, num_hidden)
         self.affine2 = nn.Linear(num_hidden, num_hidden)
         self.affine3 = nn.Linear(num_hidden, num_outputs)
-        self.noise = noise
-        self.explore_noise = expl_noise
 
         if initialize:
             self.random_initialize()
@@ -44,24 +42,25 @@ class Policy_quad(nn.Module):
             for prev_neuron_idx in range(self.affine1.weight.size(1)):
                 self.affine1.weight.data[neuron_idx][prev_neuron_idx] = dic[(neuron_idx,prev_neuron_idx)]
 
-    def gaussian(self, ins, is_training, explore):
-        if explore:
-            noise = Variable(ins.data.new(ins.size()).normal_(0, self.explore_noise))
-            return ins + noise
-        elif is_training:
-            noise = Variable(ins.data.new(ins.size()).normal_(0, self.noise))
-            return ins + noise
-        return ins
+    def select_action(self, x, noise=0):
+        with torch.no_grad():
+            if isinstance(x, np.ndarray):
+                x = torch.from_numpy(x).unsqueeze(0).float().to(next(self.parameters()).device)
+            
+            a = self.forward(x)
 
-    def set_noise(self, noise):
-        self.noise = noise
+            if noise != 0:
+                noise = Variable(a.data.new(a.size()).normal_(0, noise))
+                a = a + noise
 
-    def forward(self, x,  is_training=True, explore=False):
+        return a.data[0].cpu().numpy()
+        
+
+    def forward(self, x):
         x = torch.relu(self.affine1(x))
         x = torch.relu(self.affine2(x))
-        x = self.affine3(x)
-        action =self.gaussian(x, is_training, explore)
-        return action
+        a = self.affine3(x)
+        return a
     
 
     def train(self, x, y, batches = 5, epoch = 3):
@@ -78,6 +77,7 @@ class Policy_quad(nn.Module):
                 running_loss.append(loss.item())
             if epoch % 100 == 0:
                 print("Policy trianing: epoch %d, loss = %.3f" %(epoch, sum(running_loss)/len(running_loss)))
+
     def clean(self):
         del self.saved_state[:]
         del self.saved_action[:]

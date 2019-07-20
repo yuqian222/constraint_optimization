@@ -138,17 +138,4 @@ class Policy_lin(nn.Module):
             if epoch % 100 == 0:
                 print("Policy trianing: epoch %d, loss = %.3f" %(epoch, sum(running_loss)/len(running_loss)))
 
-    def train_Q(self, states, Q, epoch = 3):
-        for ep in range(epoch):
-            actions = self(states)
-            loss = -Q(torch.cat((states,actions), dim=1)).sum()
-            self.optimizer.zero_grad()
-            loss.backward()
-            self.optimizer.step()
-            print("policy trianing: epoch %d, loss = %.3f" %(ep, loss.item()))
-
-    def clean(self):
-        del self.saved_state[:]
-        del self.saved_action[:]
-        del self.rewards[:]
 

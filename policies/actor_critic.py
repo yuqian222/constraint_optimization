@@ -1,3 +1,4 @@
+import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
@@ -8,27 +9,24 @@ from tensorboardX import SummaryWriter
 
 
 class Actor_critic(nn.Module):
-    def __init__(self, num_inputs, num_outputs, actor, device, tau=0.7):
+    def __init__(self, num_inputs, num_outputs, actor, replay_buffer, device, tau=0.7):
         super(Actor_critic, self).__init__()
         self.device = device
         self.actor = actor
+        self.replay_buffer = replay_buffer
 
+        self.tau = tau
         self.critic = Critic(num_inputs, num_outputs).to(device)
         self.critic_target = Critic(num_inputs, num_outputs).to(device)
 
         self.optimizer = optim.RMSprop(self.critic.parameters(), weight_decay=0.01)
-        self.replay_buffer = Replay_buffer()
-        self.writer = SummaryWriter(directory)
+        #self.writer = SummaryWriter(directory)
 
-    def forward(self, s):
-        a = self.actor(s)
-        return a 
+    def forward(self, s, var):
+        return self.actor.select_action(s, var)
 
     def update(self):
-
-        states, actions, rewards, info, next_state  = zip(*rollouts)
-
-        x, y, a, r, d = self.replay_buffer.sample(args.batch_size)
+        x, y, a, r, d, info = self.replay_buffer.sample(-1) #all
 
         state = torch.FloatTensor(x).to(self.device)
         action = torch.FloatTensor(a).to(self.device)
@@ -37,31 +35,37 @@ class Actor_critic(nn.Module):
         reward = torch.FloatTensor(r).to(self.device)
 
         # Compute the target Q value
-        target_Q = self.critic_target(next_state, self.actor_target(next_state))
-        target_Q = reward + ((1 - done) * args.gamma * target_Q).detach()
+        target_Q = self.critic_target(next_state, self.actor(next_state))
+        target_Q = reward + ((1 - done) * self.replay_buffer.gamma * target_Q).detach()
 
         # Get current Q estimate
         current_Q = self.critic(state, action)
 
         # Compute critic loss
         critic_loss = F.mse_loss(current_Q, target_Q)
-        self.writer.add_scalar('Loss/critic_loss', critic_loss)
+        print("Critic training loss")
+        print(critic_loss.detach().numpy())
+        #self.writer.add_scalar('Loss/critic_loss', critic_loss)
+
+        # record TD error in buffer
+        self.replay_buffer.td_error = (current_Q - target_Q).detach().numpy()
 
         # Optimize the critic
-        self.critic_optimizer.zero_grad()
+        self.optimizer.zero_grad()
         critic_loss.backward()
-        self.critic_optimizer.step()
+        self.optimizer.step()
 
         # Update the frozen target models
         for param, target_param in zip(self.critic.parameters(), self.critic_target.parameters()):
             target_param.data.copy_(self.tau * param.data + (1 - self.tau) * target_param.data)
 
+
     def save(self, directory):
         torch.save(self.actor.state_dict(), directory + 'actor.pth')
         torch.save(self.critic.state_dict(), directory + 'critic.pth')
-        # print("====================================")
-        # print("Model has been saved...")
-        # print("====================================")
+        print("====================================")
+        print("Model has been saved...")
+        print("====================================")
 
     def load(self, directory):
         self.actor.load_state_dict(torch.load(directory + 'actor.pth'))

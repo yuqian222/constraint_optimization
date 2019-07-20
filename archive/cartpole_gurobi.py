@@ -8,6 +8,7 @@ import torch.nn as nn
 import torch as F
 import torch.optim as optim
 from torch.distributions import Categorical, Bernoulli
+from dreal import *
 from dreal import Variable as dVar
 from dreal import logical_and, sin, cos, max, tanh
 from dreal import CheckSatisfiability, Minimize
@@ -206,7 +207,7 @@ def solveNetwork(my_states, limits, policy_net, firstParam, secondParam, set, pr
     s_actions = {}
     count = 0
     if (len(my_states) == 0):
-        print "Empty state dictionary!!!"
+        print("Empty state dictionary!!!")
     for chunk_s in my_states:
         # if chunk_s[1]*chunk_s[1] > 0.01:
         #     continue
@@ -254,7 +255,7 @@ def solveNetwork(my_states, limits, policy_net, firstParam, secondParam, set, pr
                 # s_actions[chunk_s] = 1
 
 
-    print "Number of constraints are ", count
+    print("Number of constraints are ", count)
     prob.optimize()
     prob.write("file.lp")
     # for v in prob.getVars():
@@ -269,7 +270,7 @@ def solveNetwork(my_states, limits, policy_net, firstParam, secondParam, set, pr
 
 def updateParam(prob, policy_net):
     result = []
-    print "Update parameter"
+    print("Update parameter")
     for v in prob.getVars():
         result.append(v.x)
         print(v.varName, v.x)
@@ -321,7 +322,6 @@ def drawGraph(my_states):
         else:
             plt.plot(s0+math.sin(s2), math.cos(s2), 'bo', markersize=3)
 
-    print count
     plt.show()
 
 
@@ -377,11 +377,11 @@ def main():
             elif prob.status == GRB.Status.INF_OR_UNBD:
                 # prob.setParam(GRB.Param.Presolve, 0)
                 # prob.optimize()
-                print "Infeasible or unbounded"
+                print ("Infeasible or unbounded")
                 break
             elif prob.status == GRB.Status.INFEASIBLE:
                 print('Optimization was stopped with status %d' % prob.status)
-                print "Infeasible!!!"
+                print("Infeasible!!!")
                 break
 
 

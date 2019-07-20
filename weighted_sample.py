@@ -3,7 +3,6 @@
 import argparse, gym, copy, math, pickle, torch, random, json, os
 import numpy as np
 from itertools import count
-from heapq import nlargest
 from time import gmtime, strftime
 from operator import itemgetter
 import torch.nn as nn
@@ -37,7 +36,7 @@ parser.add_argument('--policy', type=str, default="linear", #or can be nn
 
 parser.add_argument('--branches', type=int, default=5, metavar='N',
                     help='branches per round (default: 5)')
-parser.add_argument('--iter_steps', type=int, default=20000, metavar='N',
+parser.add_argument('--iter_steps', type=int, default=15000, metavar='N',
                     help='num steps per iteration (default: 20,000)')
 
 parser.add_argument('--var', type=float, default=0.05,
@@ -67,16 +66,6 @@ BAD_STATE_VAR = 0.3
 SAMPLE_TRAJ = 20
 EVAL_TRAJ = 20
 
-def select_action(state, policy, is_training):
-    with torch.no_grad():
-        if isinstance(state, np.ndarray):
-            new_state = torch.from_numpy(state).unsqueeze(0)
-            action = policy(new_state.float().to(device), is_training, (not record))
-            action = action.data[0].cpu().numpy()
-        else:
-            action = policy(state, is_training, (not record))
-    return action
-
 
 def main():
 
@@ -93,17 +82,20 @@ def main():
     N_SAMPLES = int(env.observation_space.shape[0]*2) #(num_hidden) a little underdetermined
     LOW_REW_SET = N_SAMPLES*2
     TOP_N_CONSTRIANTS = int(N_SAMPLES*1.5)
+    VARIANCE = args.var
     Policy = Policy_quad
 
 
     sample_policy, sample_eval = Policy(env.observation_space.shape[0],
                                         env.action_space.shape[0],
-                                        noise=args.var,
                                         num_hidden=num_hidden).to(device), -1700
+
+    replay_buffer = Replay_buffer(args.gamma)
     
     actor_critic = Actor_critic(env.observation_space.shape[0],
                                 env.action_space.shape[0],
                                 sample_policy,
+                                replay_buffer,
                                 device)
 
     if INIT_WEIGHT:
@@ -115,7 +107,6 @@ def main():
     def make_policy():
         pi = Policy(env.observation_space.shape[0],
                     env.action_space.shape[0],
-                    noise=sample_policy.noise,
                     num_hidden=num_hidden).to(device)
         return pi
 
@@ -127,8 +118,8 @@ def main():
         if ep_no_improvement > 3:
             N_SAMPLES = int(N_SAMPLES * 1.5)
             TOP_N_CONSTRIANTS = int(N_SAMPLES*1.5)
-            sample_policy.set_noise(sample_policy.noise/2)
-            print("Updated Var to: %.3f"%(sample_policy.noise))
+            VARIANCE = VARIANCE/1.5
+            print("Updated Var to: %.3f"%(VARIANCE))
             ep_no_improvement = 0
 
 
@@ -145,25 +136,29 @@ def main():
             lowest_rew = []
 
             for t in range(1000): 
-                action = select_action(state, sample_policy, is_training=True)
+                action = actor_critic(state, VARIANCE)
                 name_str = "expl_var" #explore
 
-                copied_env = deepcopy(env)
+                if num_steps < 200:
+                    copied_env = deepcopy(env)
+                
                 next_state, reward, done, _ = env.step(action)
                 explore_rew += reward
+                
                 actor_critic.replay_buffer.push((state,next_state,action, reward, done, (name_str, explore_episodes))) 
                 #(state, next_state, action, reward, done, info)
 
-                if (ENV == "Hopper-v2" or ENV == "Walker2d-v2") and done:
-                    reward = float('-inf')
-                if len(lowest_rew) < LOW_REW_SET or (ENV == "Hopper-v2" or ENV == "Walker2d-v2" and done):
-                    state_action_rew_env.append([state,action,reward,copied_env])
-                    lowest_rew.append(reward)
-                elif reward < max(lowest_rew):
-                    state_action_rew_env = sorted(state_action_rew_env, key=lambda l: l[2]) #sort by reward
-                    state_action_rew_env[-1] = [state,action,reward,copied_env]
-                    lowest_rew.remove(max(lowest_rew))
-                    lowest_rew.append(reward)
+                if num_steps < 0:
+                    if (ENV == "Hopper-v2" or ENV == "Walker2d-v2") and done:
+                        reward = float('-inf')
+                    if len(lowest_rew) < LOW_REW_SET or (ENV == "Hopper-v2" or ENV == "Walker2d-v2" and done):
+                        state_action_rew_env.append([state,action,reward,copied_env])
+                        lowest_rew.append(reward)
+                    elif reward < max(lowest_rew):
+                        state_action_rew_env = sorted(state_action_rew_env, key=lambda l: l[2]) #sort by reward
+                        state_action_rew_env[-1] = [state,action,reward,copied_env]
+                        lowest_rew.remove(max(lowest_rew))
+                        lowest_rew.append(reward)
 
                 if done:
                     break
@@ -176,6 +171,7 @@ def main():
 
         print('\nEpisode {}\tExplore reward: {:.2f}\tAverage ep len: {:.1f}\n'.format(i_episode, explore_rew, num_steps/explore_episodes))
 
+        
         print("exploring better actions")
         low_rew_constraints_set = []
 
@@ -184,7 +180,7 @@ def main():
             max_r, max_a = r, a
             for i in range(20): #sample 20 different actions
                 step_env = deepcopy(saved_env)
-                action_explore = select_action(s, actor_critic.actor, is_training=True, record=False)
+                action_explore = actor_critic(s, BAD_STATE_VAR)
                 _, reward, done, _ = step_env.step(action_explore)
                 if reward > max_r and not done:
                     max_r, max_a = reward, action_explore
@@ -193,12 +189,13 @@ def main():
                 print("improved bad state from %.3f to %.3f" %(r, max_r))
             if len(low_rew_constraints_set) > N_SAMPLES/3:
                 break #enough bad correction constraints
+        
+        #low_rew_constraints_set=[]
 
-        actor_critic.replay_buffer.calculate_advantage() #TODO
-        best_tuples = actor_critic.replay_buffer.best_state_actions(top_n_constraints=TOP_N_CONSTRIANTS)
+        actor_critic.update()
+        best_tuples = actor_critic.replay_buffer.best_state_actions(top_n_constraints=TOP_N_CONSTRIANTS, by="td_error")
 
         # sample and solve
-
         max_policy, max_eval, max_set = actor_critic.actor, sample_eval, best_tuples
 
 
@@ -216,9 +213,10 @@ def main():
             count_steps(constraints)
 
             # Get metadata of constraints
-            states, actions, rewards, info = zip(*constraints)
+            states, actions, info, rewards, _ = zip(*constraints)
             print("ep %d b %d: %d constraints mean: %.3f  std: %.3f  max: %.3f" % ( i_episode, branch, len(constraints), np.mean(rewards), np.std(rewards), max(rewards)))
             print(info)
+
             if isinstance(states[0], torch.Tensor):
                 branch_policy.train(torch.cat(states).to(device),
                                     torch.cat(actions).to(device), epoch=args.training_epoch)
@@ -230,16 +228,19 @@ def main():
             for i in range(EVAL_TRAJ):
                 state, done = env.reset(), False
                 while not done: # Don't infinite loop while learning
-                    action = select_action(state, branch_policy, is_training=False)
-                    state, reward, done, _ = env.step(action)
+                    action = branch_policy.select_action(state,0)
+                    next_state, reward, done, _ = env.step(action)
                     eval_rew += reward
+
+                    actor_critic.replay_buffer.push((state,next_state,action, reward, done, ("b_"+str(branch), i))) 
+                    state = next_state
                     if args.render:
                         env.render()
                     if done:
                         break
 
             eval_rew /= EVAL_TRAJ
-            branch_policy.clean()
+            actor_critic.update()
 
 
             #log
@@ -255,7 +256,7 @@ def main():
         # the end of branching
         if max_eval > sample_eval:
             with open("%s/%d_constraints.p"%(dir_name,i_episode), "wb") as f:
-                pickle.dump({"all": best_tuples, "constraints": max_set}, f)
+                pickle.dump({"constraints": max_set}, f)
 
             with open("%s/%d_policy.p"%(dir_name,i_episode), 'wb') as out:
                 policy_state_dict = OrderedDict({k:v.to('cpu') for k, v in max_policy.state_dict().items()})
@@ -265,10 +266,11 @@ def main():
             ep_no_improvement = 0
         else:
             ep_no_improvement +=1
+        actor_critic.replay_buffer.clear()
 
 
 def all_l2_norm(constraints):
-    states, _, _, _ = zip(*constraints)
+    states, _, _, _,_ = zip(*constraints)
     if isinstance(states[0], torch.Tensor):
         states = [s.cpu().numpy() for s in states]
     all_dist = []
@@ -279,12 +281,6 @@ def all_l2_norm(constraints):
                 print("0 dist!!")
             all_dist.append(d)
     return sorted(all_dist)
-
-def count_steps(constriants):
-    _, _, _, info = zip(*constriants)
-    steps = [x[0] for x in info]
-    c= Counter(steps)
-    print(c.most_common(10))
 
 if __name__ == '__main__':
     main()

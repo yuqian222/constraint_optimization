@@ -30,7 +30,7 @@ parser.add_argument('--render', action='store_true', default=False,
 parser.add_argument('--env', type=str, default='HalfCheetah-v2',
                     help='enviornment (default: HalfCheetah-v2)')
 
-parser.add_argument('--policy', type=str, default="linear", #or can be nn
+parser.add_argument('--policy', type=str, default="nn", #or can be nn
                     help='policy trained. can be or linear or nn')
 
 parser.add_argument('--branches', type=int, default=5, metavar='N',
@@ -65,45 +65,6 @@ BAD_STATE_VAR = 0.3
 SAMPLE_TRAJ = 20
 EVAL_TRAJ = 20
 
-def select_action(state, policy, is_training, record=True):
-    with torch.no_grad():
-        if isinstance(state, np.ndarray):
-            new_state = torch.from_numpy(state).unsqueeze(0)
-            action = policy(new_state.float().to(device), is_training, (not record))
-            action = action.data[0].cpu().numpy()
-        else:
-            action = policy(state, is_training, (not record))
-
-        if record:
-            policy.saved_action.append(action)
-            policy.saved_state.append(state)
-
-    return action
-
-def calculate_rewards(policy):
-    R = 0
-    rewards = []
-    info = []
-    if CUMULATIVE:
-        for (r,step,name) in policy.rewards[::-1]:
-            R = r + args.gamma * R
-            rewards.insert(0, R)
-            info.insert(0, (step,name))
-            if step == 0:
-                R = 0
-    else:
-        rewards = deepcopy(policy.rewards)
-    return policy.saved_state, policy.saved_action, rewards, info
-
-
-def best_state_actions(states, actions, rewards, info, top_n_constraints=-1):
-    if top_n_constraints > 0:
-        top_n = nlargest(top_n_constraints, zip(states, actions, rewards, info), key=lambda s: s[2])
-        return top_n
-    else:
-        return zip(states, actions, rewards, info)
-
-
 
 def main():
 
@@ -116,6 +77,8 @@ def main():
     env = gym.make(ENV)
 
     num_hidden = HIDDEN_SIZE
+    VARIANCE = args.var
+
 
     # just to make more robust for differnet envs
     if POLICY == "linear":
@@ -131,8 +94,9 @@ def main():
 
     sample_policy, sample_eval = Policy(env.observation_space.shape[0],
                                         env.action_space.shape[0],
-                                        noise=args.var,
                                         num_hidden=num_hidden).to(device), -1700
+
+    replay_buffer = Replay_buffer(args.gamma)
 
     if INIT_WEIGHT:
         sample_eval = 1300
@@ -143,7 +107,6 @@ def main():
     def make_policy():
         pi = Policy(env.observation_space.shape[0],
                     env.action_space.shape[0],
-                    noise=sample_policy.noise,
                     num_hidden=num_hidden).to(device)
         return pi
 
@@ -155,7 +118,7 @@ def main():
         if ep_no_improvement > 3:
             N_SAMPLES = int(N_SAMPLES * 1.5)
             TOP_N_CONSTRIANTS = int(N_SAMPLES*1.5)
-            sample_policy.set_noise(sample_policy.noise/2)
+            VARIANCE = VARIANCE/1.5
             print("Updated Var to: %.3f"%(sample_policy.noise))
             ep_no_improvement = 0
 
@@ -172,13 +135,15 @@ def main():
             lowest_rew = []
 
             for t in range(1000): 
-                action = select_action(state, sample_policy, is_training=True)
+                action = sample_policy.select_action(state, VARIANCE)
                 name_str = "expl_var" #explore
-                copied_env = deepcopy(env)
+                if num_steps < 200:
+                    copied_env = deepcopy(env)
                 next_state, reward, done, _ = env.step(action)
                 explore_rew += reward
-                sample_policy.rewards.append((reward, t, "%s_%d"%(name_str, explore_episodes)))
 
+                replay_buffer.push((state,next_state,action, reward, done, (name_str, explore_episodes, t))) 
+                
                 if (ENV == "Hopper-v2" or ENV == "Walker2d-v2") and done:
                     reward = float('-inf')
                 if len(lowest_rew) < LOW_REW_SET or (ENV == "Hopper-v2" or ENV == "Walker2d-v2" and done):
@@ -209,7 +174,7 @@ def main():
             max_r, max_a = r, a
             for i in range(20): #sample 20 different actions
                 step_env = deepcopy(saved_env)
-                action_explore = select_action(s, sample_policy, is_training=True, record=False)
+                action_explore = sample_policy.select_action(s, BAD_STATE_VAR)
                 _, reward, done, _ = step_env.step(action_explore)
                 if reward > max_r and not done:
                     max_r, max_a = reward, action_explore
@@ -219,10 +184,8 @@ def main():
             if len(low_rew_constraints_set) > N_SAMPLES/3:
                 break #enough bad correction constraints
 
-        states, actions, rewards, info = calculate_rewards(sample_policy)
-
-        best_tuples = best_state_actions(states, actions, rewards, info, top_n_constraints=TOP_N_CONSTRIANTS)
-        sample_policy.clean()
+        
+        best_tuples = replay_buffer.best_state_actions(top_n_constraints=TOP_N_CONSTRIANTS, by='rewards', discard = True)
 
         # sample and solve
 
@@ -240,10 +203,9 @@ def main():
             '''
             constraints = random.sample(best_tuples+low_rew_constraints_set, N_SAMPLES)
             print(all_l2_norm(constraints)[:5])
-            count_steps(constraints)
 
             # Get metadata of constraints
-            states, actions, rewards, info = zip(*constraints)
+            states, actions, info, rewards, _ = zip(*constraints)
             print("ep %d b %d: %d constraints mean: %.3f  std: %.3f  max: %.3f" % ( i_episode, branch, len(constraints), np.mean(rewards), np.std(rewards), max(rewards)))
             print(info)
             if isinstance(states[0], torch.Tensor):
@@ -257,23 +219,24 @@ def main():
             for i in range(EVAL_TRAJ):
                 state, done = env.reset(), False
                 while not done: # Don't infinite loop while learning
-                    action = select_action(state, branch_policy, is_training=False)
-                    state, reward, done, _ = env.step(action)
+                    action = branch_policy.select_action(state,0)
+                    next_state, reward, done, _ = env.step(action)
                     eval_rew += reward
+
+                    #replay_buffer.push((state,next_state, action, reward, done, ("b_"+str(branch), i))) 
+                    state = next_state
+
                     if args.render:
                         env.render()
                     if done:
                         break
 
             eval_rew /= EVAL_TRAJ
-            branch_policy.clean()
-
 
             #log
             print('Episode {}\tBranch: {}\tEval reward: {:.2f}\tExplore reward: {:.2f}'.format(
                 i_episode, branch, eval_rew, explore_rew))
             logfile.write('Episode {}\tBranch: {}\tEval reward: {:.2f}\n'.format(i_episode, branch, eval_rew))
-
 
             if eval_rew > max_eval:
                 print("updated to this policy")
@@ -295,7 +258,7 @@ def main():
 
 
 def all_l2_norm(constraints):
-    states, _, _, _ = zip(*constraints)
+    states, _, _, _, _ = zip(*constraints)
     if isinstance(states[0], torch.Tensor):
         states = [s.cpu().numpy() for s in states]
     all_dist = []
@@ -306,12 +269,6 @@ def all_l2_norm(constraints):
                 print("0 dist!!")
             all_dist.append(d)
     return sorted(all_dist)
-
-def count_steps(constriants):
-    _, _, _, info = zip(*constriants)
-    steps = [x[0] for x in info]
-    c= Counter(steps)
-    print(c.most_common(10))
 
 if __name__ == '__main__':
     main()
