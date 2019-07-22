@@ -59,12 +59,12 @@ class Replay_buffer():
         if top_n_constraints > 0:
             X, Y, A, R, D, I = zip(*self.storage)
             if by == 'td_error':
-                candidate = zip(X, A, I, self.td_error, range(len(X)))
+                candidates = zip(X, A, I, self.td_error, range(len(X)))
             else: # by rewards
                 rew = self.calculate_rewards()
-                candidate = zip(X, A, I, rew, range(len(X)))
+                candidates = zip(X, A, I, rew, range(len(X)))
 
-            top_n = nlargest(top_n_constraints, candidate, key=lambda s: s[-2])
+            top_n = nlargest(top_n_constraints, candidates, key=lambda s: s[-2])
             if discard:
                 ind = [x[-1] for x in top_n]
                 new_storage = [self.storage[i] for i in ind]

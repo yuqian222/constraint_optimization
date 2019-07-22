@@ -6,7 +6,6 @@ import copy
 import torch
 import torch.nn as nn
 import torch as F
-import torch.optim as optim
 from torch.distributions import Categorical, Bernoulli
 import math
 from gurobipy import *
@@ -45,11 +44,8 @@ class Policy(nn.Module):
         action_scores = self.affine1(x)
         return F.softmax(action_scores, dim=1)
 
-
 policy = Policy()
-optimizer = optim.Adam(policy.parameters(), lr=1e-2)
 eps = np.finfo(np.float32).eps.item()
-
 
 def select_action(state):
 
@@ -165,8 +161,6 @@ def solveNetwork(my_states, policy_net, firstParam, set, prob):
     prob.write("file.lp")
 
     return prob
-
-
 
 
 def updateParam(prob, policy_net):

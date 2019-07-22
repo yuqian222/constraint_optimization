@@ -23,7 +23,7 @@ parser.add_argument('--log-interval', type=int, default=10, metavar='N',
 args = parser.parse_args()
 
 #GLOBAL VARIABLES
-INIT_WEIGHT = True
+INIT_WEIGHT = False
 VAR_BOUND = 1.0
 SLACK_BOUND = 0.05
 TOP_N_CONSTRIANTS = 18
@@ -39,6 +39,7 @@ class Policy(nn.Module):
     def __init__(self):
         super(Policy, self).__init__()
         self.affine1 = nn.Linear(17, 6)
+        self.random_initialize()
 
         self.saved_action = []
         self.saved_state = []
@@ -51,6 +52,10 @@ class Policy(nn.Module):
             self.affine1.bias.data[neuron_idx] = dic[("bias",neuron_idx)]
             for prev_neuron_idx in range(self.affine1.weight.size(1)):
                 self.affine1.weight.data[neuron_idx][prev_neuron_idx] = dic[(neuron_idx,prev_neuron_idx)]
+    def random_initialize(self):
+        nn.init.uniform_(self.affine1.weight.data, a=-0.1, b=0.1)
+        nn.init.uniform_(self.affine1.bias.data, 0.0)
+
 
     def forward(self, x):
         # x = F.tanh(self.affine1(x))
@@ -200,8 +205,8 @@ def updateParam(prob, policy_net):
         result.append(v.x)
         result_name.append(v.varName)
 
-    print(policy_net.affine1.weight)
-    print(result)
+    #print(policy_net.affine1.weight)
+    #print(result)
 
     indices = 0
     for neuron_idx in range(policy_net.affine1.weight.size(0)):

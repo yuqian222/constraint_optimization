@@ -1,0 +1,6 @@
+Episode 1	Branch: 0	Eval reward: -613.57	Explore reward: -246.55
+Episode 1	Branch: 1	Eval reward: -560.64	Explore reward: -272.27
+Episode 1	Branch: 2	Eval reward: -751.78	Explore reward: -295.92
+Episode 1	Branch: 3	Eval reward: -330.17	Explore reward: -319.79
+Episode 1	Branch: 4	Eval reward: -1226.32	Explore reward: -304.21
+Episode 2	Branch: 0	Eval reward: -351.62	Explore reward: -405.83

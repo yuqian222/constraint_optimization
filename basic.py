@@ -16,12 +16,8 @@ from policies import *
 from collections import OrderedDict, Counter
 
 
-
-device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-print('Using device:', device)
-
 parser = argparse.ArgumentParser(description='cheetah_q parser')
-parser.add_argument('--gamma', type=float, default=0.9, metavar='G',
+parser.add_argument('--gamma', type=float, default=0.99, metavar='G',
                     help='discount factor (default: 0.99)')
 parser.add_argument('--seed', type=int, default=543, metavar='N',
                     help='random seed (default: 543)')
@@ -82,20 +78,26 @@ def main():
 
     # just to make more robust for differnet envs
     if POLICY == "linear":
+        device = torch.device("cpu")
         N_SAMPLES = env.observation_space.shape[0]
-        TOP_N_CONSTRIANTS = N_SAMPLES*2
-        Policy = Policy_lin
+        LOW_REW_SET = N_SAMPLES*2
+        TOP_N_CONSTRIANTS = int(N_SAMPLES*1.5)
+        def make_policy():
+            return Policy_lin(env.observation_space.shape[0],
+                            env.action_space.shape[0]).to(device)
     elif POLICY == "nn": #assume it's 2 layer here
+        device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
         N_SAMPLES = int(env.observation_space.shape[0]*2) #(num_hidden) a little underdetermined
         LOW_REW_SET = N_SAMPLES*2
         TOP_N_CONSTRIANTS = int(N_SAMPLES*1.5)
-        Policy = Policy_quad
+        def make_policy():
+            return Policy_quad(env.observation_space.shape[0],
+                                env.action_space.shape[0],
+                                num_hidden=num_hidden).to(device)
 
+    print('Using device:', device)
 
-    sample_policy, sample_eval = Policy(env.observation_space.shape[0],
-                                        env.action_space.shape[0],
-                                        num_hidden=num_hidden).to(device), -1700
-
+    sample_policy, sample_eval = make_policy(), -1700
     replay_buffer = Replay_buffer(args.gamma)
 
     if INIT_WEIGHT:
@@ -103,12 +105,6 @@ def main():
         with open("save_1000.p",'rb') as f:
             params=pickle.load(f)
             sample_policy.init_weight(params)
-
-    def make_policy():
-        pi = Policy(env.observation_space.shape[0],
-                    env.action_space.shape[0],
-                    num_hidden=num_hidden).to(device)
-        return pi
 
     ep_no_improvement = 0
 

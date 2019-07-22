@@ -9,10 +9,10 @@ import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils.data import Dataset,DataLoader
 from torch.autograd import Variable
-from torch.distributions import Categorical, Bernoulli
+from gurobipy import *
 
 class Policy_lin(nn.Module):
-    def __init__(self, num_inputs, num_outputs, var_bound=1.0, slack_bound=0.01, initialize = True):
+    def __init__(self, num_inputs, num_outputs, var_bound=1.0, slack_bound=0.05, initialize = True):
         super(Policy_lin, self).__init__()
         self.var_bound = var_bound
         self.slack_bound = slack_bound
@@ -56,9 +56,6 @@ class Policy_lin(nn.Module):
             chunk_state.append(round(state[i], 5))
 
         chunk_state = tuple(chunk_state)
-
-        policy.saved_action.append(action)
-        policy.saved_state.append(chunk_state)
         return action
 
 
@@ -98,7 +95,7 @@ class Policy_lin(nn.Module):
 
         return firstParam, firstBias
 
-    def solve(self, constraints_dict):
+    def solve(self, state_action):
         
         prob = Model("mip1")
         firstParam, firstBias = self.initializeLimits(prob)
@@ -108,8 +105,7 @@ class Policy_lin(nn.Module):
         count = 0
         slack_vars = []
 
-        for state, action_dict in constraints_dict.items():
-            action = list(action_dict)[0]
+        for state, action in state_action:
             exprs = []
             for neuron_idx in range(self.affine1.weight.size(0)): # 0, 1
                 lin_expr = firstBias[neuron_idx]
@@ -140,6 +136,24 @@ class Policy_lin(nn.Module):
         prob.optimize()
         return (prob, 1)
 
+    def train(self, x, y, batch_size = 0, epoch = 0):
+        states = x.numpy()
+        actions = y.numpy()
+        prob, flag = self.solve(zip(states, actions))
+
+        if prob.status == GRB.Status.OPTIMAL:
+            print ("update Param using solved solution")
+            self.updateParam(prob)
+
+        elif prob.status == GRB.Status.INF_OR_UNBD or  prob.status == GRB.Status.INFEASIBLE:
+            # prob.setParam(GRB.Param.Presolve, 0)
+            # prob.optimize()
+            print('Optimization was stopped with status %d' % prob.status)
+            
+        else:
+            print('uncatched error %d' % prob.status)
+
+    '''
     def train(self, x, y, batches = 5, epoch = 3):
         training_set = value_dataset(x, y)
         training_generator = DataLoader(training_set,  batch_size=batches, shuffle=True)
@@ -155,4 +169,4 @@ class Policy_lin(nn.Module):
             if epoch % 100 == 0:
                 print("Policy trianing: epoch %d, loss = %.3f" %(epoch, sum(running_loss)/len(running_loss)))
 
-
+    '''
