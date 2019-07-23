@@ -35,13 +35,6 @@ class Policy_quad(nn.Module):
             torch.nn.init.uniform_(l.weight, -0.1, 0.1)
             nn.init.uniform_(l.bias.data, 0.0)
 
-    def init_weight(self, dic):
-        for neuron_idx in range(self.affine1.weight.size(0)):
-
-            self.affine1.bias.data[neuron_idx] = dic[("bias",neuron_idx)]
-            for prev_neuron_idx in range(self.affine1.weight.size(1)):
-                self.affine1.weight.data[neuron_idx][prev_neuron_idx] = dic[(neuron_idx,prev_neuron_idx)]
-
     def select_action(self, x, noise=0):
         with torch.no_grad():
             if isinstance(x, np.ndarray):
@@ -57,8 +50,8 @@ class Policy_quad(nn.Module):
         
 
     def forward(self, x):
-        x = torch.relu(self.affine1(x))
-        x = torch.relu(self.affine2(x))
+        x = torch.tanh(self.affine1(x))
+        x = torch.tanh(self.affine2(x))
         a = self.affine3(x)
         return a
     

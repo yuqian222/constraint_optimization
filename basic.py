@@ -89,7 +89,7 @@ def main():
         device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
         N_SAMPLES = int(env.observation_space.shape[0]*2) #(num_hidden) a little underdetermined
         LOW_REW_SET = N_SAMPLES*2
-        TOP_N_CONSTRIANTS = int(N_SAMPLES*1.5)
+        TOP_N_CONSTRIANTS = int(N_SAMPLES)
         def make_policy():
             return Policy_quad(env.observation_space.shape[0],
                                 env.action_space.shape[0],
@@ -174,7 +174,7 @@ def main():
                 if reward > max_r and not done:
                     max_r, max_a = reward, action_explore
             if max_r - r >= 0.1:
-                low_rew_constraints_set.append((s, max_a, max_r, "bad_states"))
+                low_rew_constraints_set.append((s, max_a,"bad_states", max_r, 0))
                 print("improved bad state from %.3f to %.3f" %(r, max_r))
             if len(low_rew_constraints_set) > N_SAMPLES/3:
                 break #enough bad correction constraints
@@ -183,19 +183,13 @@ def main():
         best_tuples = replay_buffer.best_state_actions(top_n_constraints=TOP_N_CONSTRIANTS, by='rewards', discard = True)
 
         # sample and solve
-
         max_policy, max_eval, max_set = sample_policy, sample_eval, best_tuples
-
 
         for branch in range(BRANCHES):
 
             branch_policy = make_policy()
-            '''
-            if len(low_rew_constraints_set) > N_SAMPLES/2:
-                corrective_constraints = low_rew_constraints_set[:int(N_SAMPLES/2)]
-            else:
-                corrective_constraints = low_rew_constraints_set
-            '''
+            branch_buffer = Replay_buffer(args.gamma)
+
             constraints = random.sample(best_tuples+low_rew_constraints_set, N_SAMPLES)
             print(all_l2_norm(constraints)[:5])
 
@@ -213,14 +207,14 @@ def main():
             eval_rew = 0
             for i in range(EVAL_TRAJ):
                 state, done = env.reset(), False
+                step = 0
                 while not done: # Don't infinite loop while learning
                     action = branch_policy.select_action(state,0)
                     next_state, reward, done, _ = env.step(action)
                     eval_rew += reward
-
-                    #replay_buffer.push((state,next_state, action, reward, done, ("b_"+str(branch), i))) 
+                    branch_buffer.push((state, next_state, action, reward, done, ("eval", i, step))) 
                     state = next_state
-
+                    step += 1
                     if args.render:
                         env.render()
                     if done:
@@ -236,6 +230,7 @@ def main():
             if eval_rew > max_eval:
                 print("updated to this policy")
                 max_eval, max_policy, max_set = eval_rew, branch_policy, constraints
+                replay_buffer = branch_buffer
 
         # the end of branching
         if max_eval > sample_eval:
@@ -253,7 +248,7 @@ def main():
 
 
 def all_l2_norm(constraints):
-    states, _, _, _, _ = zip(*constraints)
+    states, _, _, _ ,_ = zip(*constraints)
     if isinstance(states[0], torch.Tensor):
         states = [s.cpu().numpy() for s in states]
     all_dist = []
