@@ -16,6 +16,8 @@ from policies import *
 from collections import OrderedDict, Counter
 
 from replay.replay import Trained_model_wrapper
+import sys
+sys.path.append('./replay')
 
 
 parser = argparse.ArgumentParser(description='cheetah_q parser')
@@ -35,11 +37,13 @@ parser.add_argument('--branches', type=int, default=10, metavar='N',
                     help='branches per round (default: 5)')
 parser.add_argument('--iter_steps', type=int, default=10000, metavar='N',
                     help='num steps per iteration (default: 10,000)')
-
 parser.add_argument('--var', type=float, default=0.05,
                     help='sample variance (default: 0.05)')
 parser.add_argument('--hidden_size', type=int, default=24,
                     help='hidden size of policy nn (default: 24)')
+
+parser.add_argument('--correct', type=bool, default=False,
+                    help='whether to explore corrective actions or not')
 
 parser.add_argument('--training_epoch', type=int, default=500,
                     help='Training epochs for each policy update (default: 500)')
@@ -100,10 +104,11 @@ def main():
 
     print('Using device:', device)
 
-    sample_policy, sample_eval = make_policy(), 2000
+    sample_policy, sample_eval = make_policy, -1700
 
     if len(args.load_dir) > 0:
-        sample_policy = Trained_model_wrapper(args.env, load_dir, args.seed)
+        sample_policy = Trained_model_wrapper(args.env, args.load_dir, args.seed)
+        sample_eval = 2500
 
 
     replay_buffer = Replay_buffer(args.gamma)
@@ -141,23 +146,25 @@ def main():
             for t in range(1000): 
                 action = sample_policy.select_action(state, VARIANCE)
                 name_str = "expl_var" #explore
-                if num_steps < 200:
-                    copied_env = deepcopy(env)
+                if args.correct:
+                    if num_steps < 200:
+                        copied_env = deepcopy(env)
                 next_state, reward, done, _ = env.step(action)
                 explore_rew += reward
 
                 replay_buffer.push((state,next_state,action, reward, done, (name_str, explore_episodes, t))) 
                 
-                if (ENV == "Hopper-v2" or ENV == "Walker2d-v2") and done:
-                    reward = float('-inf')
-                if len(lowest_rew) < LOW_REW_SET or (ENV == "Hopper-v2" or ENV == "Walker2d-v2" and done):
-                    state_action_rew_env.append([state,action,reward,copied_env])
-                    lowest_rew.append(reward)
-                elif reward < max(lowest_rew):
-                    state_action_rew_env = sorted(state_action_rew_env, key=lambda l: l[2]) #sort by reward
-                    state_action_rew_env[-1] = [state,action,reward,copied_env]
-                    lowest_rew.remove(max(lowest_rew))
-                    lowest_rew.append(reward)
+                if args.correct:
+                    if (ENV == "Hopper-v2" or ENV == "Walker2d-v2") and done:
+                        reward = float('-inf')
+                    if len(lowest_rew) < LOW_REW_SET or (ENV == "Hopper-v2" or ENV == "Walker2d-v2" and done):
+                        state_action_rew_env.append([state,action,reward,copied_env])
+                        lowest_rew.append(reward)
+                    elif reward < max(lowest_rew):
+                        state_action_rew_env = sorted(state_action_rew_env, key=lambda l: l[2]) #sort by reward
+                        state_action_rew_env[-1] = [state,action,reward,copied_env]
+                        lowest_rew.remove(max(lowest_rew))
+                        lowest_rew.append(reward)
 
                 if done:
                     break
@@ -170,25 +177,28 @@ def main():
 
         print('\nEpisode {}\tExplore reward: {:.2f}\tAverage ep len: {:.1f}\n'.format(i_episode, explore_rew, num_steps/explore_episodes))
 
-        print("exploring better actions")
-        low_rew_constraints_set = []
+        if args.correct:
+            print("exploring better actions")
+            low_rew_constraints_set = []
 
-        #sample possible corrections
-        for s, a, r, saved_env in state_action_rew_env:
-            max_r, max_a = r, a
-            for i in range(20): #sample 20 different actions
-                step_env = deepcopy(saved_env)
-                action_explore = sample_policy.select_action(s, BAD_STATE_VAR)
-                _, reward, done, _ = step_env.step(action_explore)
-                if reward > max_r and not done:
-                    max_r, max_a = reward, action_explore
-            if max_r - r >= 0.1:
-                low_rew_constraints_set.append((s, max_a,"bad_states", max_r, 0))
-                print("improved bad state from %.3f to %.3f" %(r, max_r))
-            if len(low_rew_constraints_set) > N_SAMPLES/3:
-                break #enough bad correction constraints
+            #sample possible corrections
+            for s, a, r, saved_env in state_action_rew_env:
+                max_r, max_a = r, a
+                for i in range(20): #sample 20 different actions
+                    step_env = deepcopy(saved_env)
+                    action_explore = sample_policy.select_action(s, BAD_STATE_VAR)
+                    _, reward, done, _ = step_env.step(action_explore)
+                    if reward > max_r and not done:
+                        max_r, max_a = reward, action_explore
+                if max_r - r >= 0.1:
+                    low_rew_constraints_set.append((s, max_a,"bad_states", max_r, 0))
+                    print("improved bad state from %.3f to %.3f" %(r, max_r))
+                if len(low_rew_constraints_set) > N_SAMPLES/3:
+                    break #enough bad correction constraints
+        else:
+            low_rew_constraints_set = []
 
-        
+            
         best_tuples = replay_buffer.best_state_actions(top_n_constraints=TOP_N_CONSTRIANTS, by='rewards', discard = True)
 
         # sample and solve
@@ -206,12 +216,20 @@ def main():
             states, actions, info, rewards, _ = zip(*constraints)
             print("ep %d b %d: %d constraints mean: %.3f  std: %.3f  max: %.3f" % ( i_episode, branch, len(constraints), np.mean(rewards), np.std(rewards), max(rewards)))
             print(info)
+
             if isinstance(states[0], torch.Tensor):
-                branch_policy.train(torch.cat(states).to(device),
-                                    torch.cat(actions).to(device), epoch=args.training_epoch)
+                states = torch.cat(states)
             else:
-                branch_policy.train(torch.tensor(states).float().to(device),
-                                    torch.tensor(actions).float().to(device), epoch=args.training_epoch)
+                states = torch.tensor(states).float()
+            
+            if isinstance(actions[0], torch.Tensor):
+                actions = torch.cat(actions)
+            else: 
+                actions = torch.tensor(actions).float()
+           
+            
+            branch_policy.train(states.to(device), actions.to(device), epoch=args.training_epoch)
+           
             # Evaluate
             eval_rew = 0
             for i in range(EVAL_TRAJ):
