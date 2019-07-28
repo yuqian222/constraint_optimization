@@ -13,6 +13,8 @@ from torch.distributions import Categorical, Bernoulli
 from copy import deepcopy
 
 from policies import *
+from args import get_args
+
 from collections import OrderedDict, Counter
 
 from replay.replay import Trained_model_wrapper
@@ -20,48 +22,12 @@ import sys
 sys.path.append('./replay')
 
 
-parser = argparse.ArgumentParser(description='cheetah_q parser')
-parser.add_argument('--gamma', type=float, default=0.99, metavar='G',
-                    help='discount factor (default: 0.99)')
-parser.add_argument('--seed', type=int, default=543, metavar='N',
-                    help='random seed (default: 543)')
-parser.add_argument('--render', action='store_true', default=False,
-                    help='render the environment')
-parser.add_argument('--env', type=str, default='HalfCheetah-v2',
-                    help='enviornment (default: HalfCheetah-v2)')
-
-parser.add_argument('--policy', type=str, default="nn",
-                    help='policy trained. can be or linear or nn')
-
-parser.add_argument('--branches', type=int, default=10, metavar='N',
-                    help='branches per round (default: 5)')
-parser.add_argument('--iter_steps', type=int, default=10000, metavar='N',
-                    help='num steps per iteration (default: 10,000)')
-parser.add_argument('--var', type=float, default=0.05,
-                    help='sample variance (default: 0.05)')
-parser.add_argument('--hidden_size', type=int, default=24,
-                    help='hidden size of policy nn (default: 24)')
-
-parser.add_argument('--correct', type=bool, default=False,
-                    help='whether to explore corrective actions or not')
-
-parser.add_argument('--training_epoch', type=int, default=500,
-                    help='Training epochs for each policy update (default: 500)')
-
-parser.add_argument('--load_dir', type=str, default="")
-args = parser.parse_args()
-
 #GLOBAL VARIABLES
-ENV = args.env
 INIT_WEIGHT = False
 CUMULATIVE = True
-TOP_N_CONSTRIANTS = 30
-N_SAMPLES = 15
+TOP_N_CONSTRIANTS = 60
+N_SAMPLES = 25
 STEP_SIZE = 0.01
-BRANCHES = args.branches
-POLICY = args.policy
-MAX_STEPS = args.iter_steps
-HIDDEN_SIZE = args.hidden_size
 LOW_REW_SET = 20
 BAD_STATE_VAR = 0.3
 
@@ -70,21 +36,23 @@ SAMPLE_TRAJ = 20
 EVAL_TRAJ = 20
 
 
-def main():
 
-    dir_name = "results/%s/%s-%s"%(ENV, "basic", strftime("%m_%d_%H_%M", gmtime()))
+def main():
+    args = get_args()
+
+    dir_name = "results/%s/%s-%s"%(args.env, "basic", strftime("%m_%d_%H_%M", gmtime()))
     os.makedirs(dir_name, exist_ok=True)
     logfile = open(dir_name+"/log.txt", "w")
 
     torch.manual_seed(args.seed)
     torch.cuda.manual_seed_all(args.seed)
-    env = gym.make(ENV)
+    env = gym.make(args.env)
 
     num_hidden = HIDDEN_SIZE
     VARIANCE = args.var
 
     # just to make more robust for differnet envs
-    if POLICY == "linear":
+    if args.policy == "linear":
         device = torch.device("cpu")
         N_SAMPLES = env.observation_space.shape[0]
         LOW_REW_SET = N_SAMPLES*2
@@ -92,7 +60,7 @@ def main():
         def make_policy():
             return Policy_lin(env.observation_space.shape[0],
                             env.action_space.shape[0]).to(device)
-    elif POLICY == "nn": #assume it's 2 layer here
+    elif args.policy == "nn": #assume it's 2 layer here
         device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
         N_SAMPLES = int(env.observation_space.shape[0]*2) #(num_hidden) a little underdetermined
         LOW_REW_SET = N_SAMPLES*2
@@ -104,7 +72,7 @@ def main():
 
     print('Using device:', device)
 
-    sample_policy, sample_eval = make_policy, -1700
+    sample_policy, sample_eval = make_policy(), -1700
 
     if len(args.load_dir) > 0:
         sample_policy = Trained_model_wrapper(args.env, args.load_dir, args.seed)
@@ -137,7 +105,7 @@ def main():
         explore_episodes = 0
         explore_rew =0
 
-        while num_steps < MAX_STEPS:
+        while num_steps < args.iter_steps:
             state = env.reset()
 
             state_action_rew_env = []
@@ -204,7 +172,7 @@ def main():
         # sample and solve
         max_policy, max_eval, max_set = sample_policy, sample_eval, best_tuples
 
-        for branch in range(BRANCHES):
+        for branch in range(args.branches):
 
             branch_policy = make_policy()
             branch_buffer = Replay_buffer(args.gamma)

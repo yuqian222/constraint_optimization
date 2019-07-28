@@ -63,8 +63,9 @@ class VecPyTorch(VecEnvWrapper):
     def step_async(self, actions):
         if isinstance(actions, torch.LongTensor):
             # Squeeze the dimension for discrete actions
-            actions = actions.squeeze(1)
-        actions = actions.cpu().numpy()
+            actions = actions.squeeze(1).cpu().numpy()
+        if isinstance(actions, torch.Tensor):
+            actions = actions.cpu().numpy()
         self.venv.step_async(actions)
 
     def step_wait(self):
