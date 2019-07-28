@@ -56,20 +56,23 @@ class Replay_buffer():
 
 
     def best_state_actions(self, top_n_constraints=-1, by='td_error', discard = False):
-        if top_n_constraints > 0:
-            X, Y, A, R, D, I = zip(*self.storage)
-            if by == 'td_error':
-                candidates = zip(X, A, I, self.td_error, range(len(X)))
-            else: # by rewards
-                rew = self.calculate_rewards()
-                candidates = zip(X, A, I, rew, range(len(X)))
 
+        X, Y, A, R, D, I = zip(*self.storage)
+        if by == 'td_error':
+            candidates = zip(X, A, I, self.td_error, range(len(X)))
+        else: # by rewards
+            rew = self.calculate_rewards()
+            candidates = zip(X, A, I, rew, range(len(X)))
+
+        if top_n_constraints > 0:
             top_n = nlargest(top_n_constraints, candidates, key=lambda s: s[-2])
-            if discard:
-                ind = [x[-1] for x in top_n]
-                new_storage = [self.storage[i] for i in ind]
-                self.storage = new_storage
-            return top_n
         else:
-            return []
+            top_n = list(candidates)
+
+        if discard:
+            ind = [x[-1] for x in top_n]
+            new_storage = [self.storage[i] for i in ind]
+            self.storage = new_storage
+        return top_n
+
 

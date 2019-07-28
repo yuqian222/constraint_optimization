@@ -39,7 +39,7 @@ class Trained_model_wrapper():
         normalized = torch.Tensor(self.env.get_normalized(state)).to(self.device)
         recurrent_hidden_states = torch.zeros(1,self.actor_critic.recurrent_hidden_state_size).to(self.device)
         value, action, _, _ = self.actor_critic.act(normalized, recurrent_hidden_states, torch.zeros(1, 1), deterministic=True)
-        return action[0][0][0].detach().float().numpy()
+        return action[0][0][0].detach().cpu().float().numpy()
 
 
     def play(self):
