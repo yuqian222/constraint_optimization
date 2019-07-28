@@ -49,6 +49,7 @@ parser.add_argument('--training_epoch', type=int, default=500,
                     help='Training epochs for each policy update (default: 500)')
 
 parser.add_argument('--load_dir', type=str, default="")
+parser.add_argument('--n_samples', type=int, default=0)
 args = parser.parse_args()
 
 #GLOBAL VARIABLES
@@ -72,7 +73,7 @@ EVAL_TRAJ = 20
 
 def main():
 
-    dir_name = "results/%s/%s-%s"%(ENV, "basic", strftime("%m_%d_%H_%M", gmtime()))
+    dir_name = "results/%s/%s-%s"%(ENV, "imitation", strftime("%m_%d_%H_%M", gmtime()))
     os.makedirs(dir_name, exist_ok=True)
     logfile = open(dir_name+"/log.txt", "w")
 
@@ -86,7 +87,7 @@ def main():
     # just to make more robust for differnet envs
     if POLICY == "linear":
         device = torch.device("cpu")
-        N_SAMPLES = env.observation_space.shape[0]
+        N_SAMPLES = args.n_samples if args.n_samples>0 else int(env.observation_space.shape[0]*2)
         LOW_REW_SET = N_SAMPLES*2
         TOP_N_CONSTRIANTS = int(N_SAMPLES*1.5)
         def make_policy():
@@ -94,9 +95,9 @@ def main():
                             env.action_space.shape[0]).to(device)
     elif POLICY == "nn": #assume it's 2 layer here
         device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-        N_SAMPLES = int(env.observation_space.shape[0]*2) #(num_hidden) a little underdetermined
+        N_SAMPLES = args.n_samples if args.n_samples>0 else int(env.observation_space.shape[0]*2)
         LOW_REW_SET = N_SAMPLES*2
-        TOP_N_CONSTRIANTS = int(N_SAMPLES)
+        TOP_N_CONSTRIANTS = -1 #int(N_SAMPLES*200)
         def make_policy():
             return Policy_quad(env.observation_space.shape[0],
                                 env.action_space.shape[0],
@@ -127,7 +128,7 @@ def main():
         # hack
         if ep_no_improvement > 3:
             N_SAMPLES = int(N_SAMPLES * 1.5)
-            TOP_N_CONSTRIANTS = int(N_SAMPLES*1.5)
+            TOP_N_CONSTRIANTS = -1 #int(N_SAMPLES*1.5)
             VARIANCE = VARIANCE/1.5
             print("Updated Var to: %.3f"%(VARIANCE))
             ep_no_improvement = 0
@@ -215,7 +216,8 @@ def main():
             # Get metadata of constraints
             states, actions, info, rewards, _ = zip(*constraints)
             print("ep %d b %d: %d constraints mean: %.3f  std: %.3f  max: %.3f" % ( i_episode, branch, len(constraints), np.mean(rewards), np.std(rewards), max(rewards)))
-            print(info)
+            
+            print(len(info))
 
             if isinstance(states[0], torch.Tensor):
                 states = torch.cat(states)
@@ -252,7 +254,7 @@ def main():
             #log
             print('Episode {}\tBranch: {}\tEval reward: {:.2f}\tExplore reward: {:.2f}'.format(
                 i_episode, branch, eval_rew, explore_rew))
-            logfile.write('Episode {}\tBranch: {}\tEval reward: {:.2f}\n'.format(i_episode, branch, eval_rew))
+            logfile.write('Episode {}\tBranch: {}\tConstraints:{}\tEval reward: {:.2f}\n'.format(i_episode, branch, len(constraints), eval_rew))
 
             if eval_rew > max_eval:
                 print("updated to this policy")
