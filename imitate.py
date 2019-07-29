@@ -1,25 +1,22 @@
-import argparse, gym, copy, math, pickle, torch, random, json, os
+import argparse, gym, copy, math, pickle, torch, random, json, os, sys
 import numpy as np
 from itertools import count
-from heapq import nlargest
 from time import gmtime, strftime
 from operator import itemgetter
+from copy import deepcopy
+from collections import OrderedDict, Counter
+sys.path.append('./replay')
+
 import torch.nn as nn
 import torch as F
 import torch.optim as optim
 from torch.utils.data import Dataset,DataLoader
 from torch.autograd import Variable
 from torch.distributions import Categorical, Bernoulli
-from copy import deepcopy
 
 from policies import *
 from args import get_args
-
-from collections import OrderedDict, Counter
-
 from replay.replay import Trained_model_wrapper
-import sys
-sys.path.append('./replay')
 
 
 #GLOBAL VARIABLES
@@ -40,8 +37,7 @@ EVAL_TRAJ = 20
 def main():
     args = get_args()
 
-
-    dir_name = "results/%s/%s-%s"%(ENV, "imitation", strftime("%m_%d_%H_%M", gmtime()))
+    dir_name = "results/%s/%s-%s"%(args.env, "imitation", strftime("%m_%d_%H_%M", gmtime()))
 
     os.makedirs(dir_name, exist_ok=True)
     logfile = open(dir_name+"/log.txt", "w")
@@ -50,13 +46,13 @@ def main():
     torch.cuda.manual_seed_all(args.seed)
     env = gym.make(args.env)
 
-    num_hidden = HIDDEN_SIZE
+    num_hidden = args.hidden_size
     VARIANCE = args.var
 
     # just to make more robust for differnet envs
     if args.policy == "linear":
         device = torch.device("cpu")
-        N_SAMPLES = args.n_samples if args.n_samples>0 else int(env.observation_space.shape[0]*2)
+        N_SAMPLES = args.n_samples if args.n_samples > 0 else int(env.observation_space.shape[0])
         LOW_REW_SET = N_SAMPLES*2
         TOP_N_CONSTRIANTS = int(N_SAMPLES*1.5)
         def make_policy():
@@ -250,12 +246,15 @@ def all_l2_norm(constraints):
     if isinstance(states[0], torch.Tensor):
         states = [s.cpu().numpy() for s in states]
     all_dist = []
+    zerodist = 0
     for i, x1 in enumerate(states):
         for x2 in states[i+1:]:
             d=np.linalg.norm(np.subtract(x1,x2))
             if d - 0 < 1e-2:
-                print("0 dist!!")
+                zerodist +=1
             all_dist.append(d)
+    if zerodist > 0 :
+        print("0 distances: %d" % zerodist)
     return sorted(all_dist)
 
 if __name__ == '__main__':
