@@ -108,12 +108,27 @@ def no_0_dist(state, slist):
     if isinstance(state, torch.Tensor):
         for x in slist:
             d = (state - x).pow(2).sum()
-            if d < 2.5*1e-6:
+            if d < 1e-4:
                 return False
     else:
         for x in slist:
             d = np.linalg.norm(np.subtract(state,x))
-            if d < 5*1e-3:
+            if d < 1e-2:
                 return False
     return True
 
+def all_l2_norm(constraints):
+    states, _, _, _ ,_ = zip(*constraints)
+    if isinstance(states[0], torch.Tensor):
+        states = [s.cpu().numpy() for s in states]
+    all_dist = []
+    zerodist = 0
+    for i, x1 in enumerate(states):
+        for x2 in states[i+1:]:
+            d=np.linalg.norm(np.subtract(x1,x2))
+            if d - 0 < 1e-2:
+                zerodist +=1
+            all_dist.append(d)
+    if zerodist > 0 :
+        print("0 distances: %d" % zerodist)
+    return sorted(all_dist)

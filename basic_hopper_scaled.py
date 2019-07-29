@@ -1,21 +1,25 @@
 import argparse, gym, copy, math, pickle, torch, random, json, os
 import numpy as np
 from itertools import count
+from heapq import nlargest
 from time import gmtime, strftime
 from operator import itemgetter
-from copy import deepcopy
-from collections import OrderedDict, Counter
-
 import torch.nn as nn
 import torch as F
 import torch.optim as optim
 from torch.utils.data import Dataset,DataLoader
 from torch.autograd import Variable
 from torch.distributions import Categorical, Bernoulli
+from copy import deepcopy
 
 from policies import *
 from args import get_args
 
+from collections import OrderedDict, Counter
+
+from replay.replay import Trained_model_wrapper
+import sys
+sys.path.append('./replay')
 
 
 #GLOBAL VARIABLES
@@ -52,7 +56,7 @@ def main():
     # just to make more robust for differnet envs
     if args.policy == "linear":
         device = torch.device("cpu")
-        N_SAMPLES = args.n_samples if args.n_samples>0 else int(env.observation_space.shape[0] + 1)
+        N_SAMPLES = args.n_samples if args.n_samples>0 else int(env.observation_space.shape[0]*2)
         LOW_REW_SET = N_SAMPLES*2
         TOP_N_CONSTRIANTS = int(N_SAMPLES*1.5)
         def make_policy():
@@ -88,15 +92,10 @@ def main():
 
 
     for i_episode in count(1):
-        if args.policy == 'linear':
-            print(sample_policy.affine1.weight.data)
-            print(sample_policy.affine1.bias.data)
-
 
         # hack
         if ep_no_improvement > 3:
-            if args.policy == 'nn':
-                N_SAMPLES = int(N_SAMPLES * 1.5)
+            N_SAMPLES = int(N_SAMPLES * 1.5)
             TOP_N_CONSTRIANTS = -1 #int(N_SAMPLES*1.5)
             VARIANCE = VARIANCE/1.5
             print("Updated Var to: %.3f"%(VARIANCE))
@@ -148,7 +147,6 @@ def main():
 
         print('\nEpisode {}\tExplore reward: {:.2f}\tAverage ep len: {:.1f}\n'.format(i_episode, explore_rew, num_steps/explore_episodes))
 
-
         if args.correct:
             print("exploring better actions")
             low_rew_constraints_set = []
@@ -171,7 +169,7 @@ def main():
             low_rew_constraints_set = []
 
             
-        best_tuples = replay_buffer.best_state_actions_replace(top_n_constraints=TOP_N_CONSTRIANTS, by='rewards', discard = True)
+        best_tuples = replay_buffer.best_state_actions(top_n_constraints=TOP_N_CONSTRIANTS, by='rewards', discard = True)
 
         # sample and solve
         max_policy, max_eval, max_set = sample_policy, sample_eval, best_tuples
@@ -187,7 +185,9 @@ def main():
             # Get metadata of constraints
             states, actions, info, rewards, _ = zip(*constraints)
             print("ep %d b %d: %d constraints mean: %.3f  std: %.3f  max: %.3f" % ( i_episode, branch, len(constraints), np.mean(rewards), np.std(rewards), max(rewards)))
+            
             print(len(info))
+
             if isinstance(states[0], torch.Tensor):
                 states = torch.cat(states)
             else:
@@ -207,7 +207,7 @@ def main():
                 state, done = env.reset(), False
                 step = 0
                 while not done: # Don't infinite loop while learning
-                    
+
                     normed_state = (state - state_mean)/state_std
                     action = branch_policy.select_action(normed_state, 0)
                     next_state, reward, done, _ = env.step(action)
@@ -245,8 +245,6 @@ def main():
             ep_no_improvement = 0
         else:
             ep_no_improvement +=1
-
-
 
 
 if __name__ == '__main__':

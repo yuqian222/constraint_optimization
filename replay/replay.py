@@ -9,8 +9,6 @@ import torch
 from .a2c_ppo_acktr.envs import VecPyTorch, make_vec_envs
 from .a2c_ppo_acktr.utils import get_render_func, get_vec_normalize
 
-
-
 class Trained_model_wrapper():
     def __init__(self, env_name, load_dir, seed):
         device_name = "cuda:0" if torch.cuda.is_available() else "cpu"

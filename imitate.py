@@ -17,6 +17,7 @@ from torch.distributions import Categorical, Bernoulli
 from policies import *
 from args import get_args
 from replay.replay import Trained_model_wrapper
+from replay.linear_replay import Trained_model_wrapper_lin
 
 
 #GLOBAL VARIABLES
@@ -72,9 +73,13 @@ def main():
 
     sample_policy, sample_eval = make_policy(), -1700
 
-    if len(args.load_dir) > 0:
+    if args.load_dir[-3:] == 'npz': 
+        sample_policy = Trained_model_wrapper_lin(args.env, args.load_dir)
+        sample_eval = 2500
+    elif len(args.load_dir) > 0: #nn
         sample_policy = Trained_model_wrapper(args.env, args.load_dir, args.seed)
         sample_eval = 2500
+
 
 
     replay_buffer = Replay_buffer(args.gamma)
