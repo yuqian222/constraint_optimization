@@ -39,12 +39,12 @@ EVAL_TRAJ = 20
 
 def main():
     args = get_args()
-
-
     dir_name = "results/%s/%s-%s"%(args.env, "basic", strftime("%m_%d_%H_%M", gmtime()))
-
     os.makedirs(dir_name, exist_ok=True)
     logfile = open(dir_name+"/log.txt", "w")
+
+    with open(os.path.join(dir_name,'args.txt'), 'w') as f:
+        json.dump(args.__dict__, f, indent=2)
 
     torch.manual_seed(args.seed)
     torch.cuda.manual_seed_all(args.seed)
@@ -56,7 +56,7 @@ def main():
     # just to make more robust for differnet envs
     if args.policy == "linear":
         device = torch.device("cpu")
-        N_SAMPLES = args.n_samples if args.n_samples>0 else int(env.observation_space.shape[0]*2)
+        N_SAMPLES = args.n_samples if args.n_samples>0 else int(env.observation_space.shape[0]*1.5)
         LOW_REW_SET = N_SAMPLES*2
         TOP_N_CONSTRIANTS = int(N_SAMPLES*1.5)
         def make_policy():
@@ -110,6 +110,7 @@ def main():
 
             for t in range(1000): 
                 action = sample_policy.select_action(state, VARIANCE)
+                action = action.flatten()
                 name_str = "expl_var" #explore
                 if args.correct:
                     if num_steps < 200:
@@ -152,6 +153,7 @@ def main():
                 for i in range(20): #sample 20 different actions
                     step_env = deepcopy(saved_env)
                     action_explore = sample_policy.select_action(s, BAD_STATE_VAR)
+                    action = action.flatten()
                     _, reward, done, _ = step_env.step(action_explore)
                     if reward > max_r and not done:
                         max_r, max_a = reward, action_explore
@@ -190,10 +192,9 @@ def main():
             
             if isinstance(actions[0], torch.Tensor):
                 actions = torch.cat(actions)
-            else: 
+            else:
                 actions = torch.tensor(actions).float()
-           
-            
+
             branch_policy.train(states.to(device), actions.to(device), epoch=args.training_epoch)
            
             # Evaluate
@@ -203,6 +204,7 @@ def main():
                 step = 0
                 while not done: # Don't infinite loop while learning
                     action = branch_policy.select_action(state,0)
+                    action = action.flatten()
                     next_state, reward, done, _ = env.step(action)
                     eval_rew += reward
                     branch_buffer.push((state, next_state, action, reward, done, ("eval", i, step))) 

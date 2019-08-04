@@ -34,22 +34,20 @@ class Trained_model_wrapper():
 
     
     def select_action(self, state, variance): #variance is a dummy
-        normalized = torch.Tensor(self.env.get_normalized(state)).to(self.device)
+        normalized = torch.Tensor(self.env.get_normalized([state])).to(self.device)
         recurrent_hidden_states = torch.zeros(1,self.actor_critic.recurrent_hidden_state_size).to(self.device)
         value, action, _, _ = self.actor_critic.act(normalized, recurrent_hidden_states, torch.zeros(1, 1), deterministic=True)
-        return action[0][0][0].detach().cpu().float().numpy()
+        return action.detach().cpu().float().numpy()
 
-
-    def play(self):
-
+    def play(self, n=10):
         recurrent_hidden_states = torch.zeros(1,
                                 self.actor_critic.recurrent_hidden_state_size).to(self.device)
         masks = torch.zeros(1, 1)
 
         obs = self.env.reset()
-
         rew = 0
-        while True:
+        traj = 0
+        while traj < n:
             with torch.no_grad():
                 value, action, _, recurrent_hidden_states = self.actor_critic.act(
                     obs, recurrent_hidden_states, masks, deterministic=True)
@@ -61,7 +59,9 @@ class Trained_model_wrapper():
 
             if done:
                 print(rew)
+                traj += 1
                 rew = 0
+
 
 if __name__ == '__main__':
     Trained_model_wrapper("Hopper-v2", "./trained_models/", 567).play()

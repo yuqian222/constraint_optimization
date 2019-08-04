@@ -46,7 +46,7 @@ class Policy_quad(nn.Module):
                 noise = Variable(a.data.new(a.size()).normal_(0, noise))
                 a = a + noise
 
-        return a.data[0].cpu().numpy()
+        return a.data.cpu().numpy()
         
 
     def forward(self, x):
@@ -55,7 +55,33 @@ class Policy_quad(nn.Module):
         a = self.affine3(x)
         return a
     
+    def train(self, x, y, epoch = 1):
+        tol = torch.Tensor([5*1e-4])
+        prev_loss = torch.Tensor([0])
+        for e in range(epoch):
+            pred = self.forward(x).squeeze()
+            loss = self.criterion(pred, y)
+            
+            self.optimizer.zero_grad()
+            loss.backward(retain_graph=True)
+            self.optimizer.step()
+                       
+            if e % 500 == 0:
+                print("Policy trianing: epoch %d, loss = %.3f" %(e, loss.item()))
+            if torch.abs(prev_loss-loss) < tol:
+                print("converged: epoch %d, loss = %.3f" %(e, loss.item()))
+                return
+            elif e == epoch-1:
+                print("max iter: epoch %d, loss = %.3f" %(e, loss.item()))
+                return
+        prev_loss = loss
 
+    def clean(self):
+        del self.saved_state[:]
+        del self.saved_action[:]
+        del self.rewards[:]
+
+    '''
     def train(self, x, y, batches = 5, epoch = 3):
         training_set = value_dataset(x, y)
         training_generator = DataLoader(training_set,  batch_size=batches, shuffle=True)
@@ -68,15 +94,9 @@ class Policy_quad(nn.Module):
                 loss.backward()
                 self.optimizer.step()
                 running_loss.append(loss.item())
-            if epoch % 100 == 0:
+            if epoch % 1000 == 0:
                 print("Policy trianing: epoch %d, loss = %.3f" %(epoch, sum(running_loss)/len(running_loss)))
-
-    def clean(self):
-        del self.saved_state[:]
-        del self.saved_action[:]
-        del self.rewards[:]
-
-
+    '''
 
 
 class value_dataset(Dataset):

@@ -36,7 +36,6 @@ EVAL_TRAJ = 20
 def main():
     args = get_args()
 
-
     dir_name = "results/%s/%s-%s"%(args.env, "basic", strftime("%m_%d_%H_%M", gmtime()))
 
     os.makedirs(dir_name, exist_ok=True)
@@ -83,8 +82,8 @@ def main():
     ep_no_improvement = 0
 
     #normalization
-    state_mean = [1.3702629,-0.07069324,-0.27531521,-0.36526542,0.25406556,2.06729047 ,-0.0087241,-0.01395548,-0.08856127,-0.06893849,-0.43232723]
-    state_std = [0.17862577,0.05383182,0.1708846,0.11273101,0.62445197,0.58777612,1.54296331,0.48286574,1.43903429,1.06015567,5.86508011]
+    #state_mean = [1.3702629,-0.07069324,-0.27531521,-0.36526542,0.25406556,2.06729047 ,-0.0087241,-0.01395548,-0.08856127,-0.06893849,-0.43232723]
+    #state_std = [0.17862577,0.05383182,0.1708846,0.11273101,0.62445197,0.58777612,1.54296331,0.48286574,1.43903429,1.06015567,5.86508011]
 
 
     for i_episode in count(1):
@@ -114,8 +113,10 @@ def main():
             lowest_rew = []
 
             for t in range(1000): 
-                normed_state = (state - state_mean)/state_std
-                action = sample_policy.select_action(normed_state, VARIANCE)
+                #normed_state = (state - state_mean)/state_std
+                #action = sample_policy.select_action(normed_state, VARIANCE)
+                action = sample_policy.select_action(state, VARIANCE)
+
                 name_str = "expl_var" #explore
                 if args.correct:
                     if num_steps < 200:
@@ -208,8 +209,10 @@ def main():
                 step = 0
                 while not done: # Don't infinite loop while learning
                     
-                    normed_state = (state - state_mean)/state_std
-                    action = branch_policy.select_action(normed_state, 0)
+                    #normed_state = (state - state_mean)/state_std
+                    #action = branch_policy.select_action(normed_state, 0)
+                    action = branch_policy.select_action(state, 0)
+
                     next_state, reward, done, _ = env.step(action)
                     eval_rew += reward
                     branch_buffer.push((state, next_state, action, reward, done, ("eval", i, step))) 

@@ -42,6 +42,8 @@ def main():
 
     os.makedirs(dir_name, exist_ok=True)
     logfile = open(dir_name+"/log.txt", "w")
+    with open(os.path.join(dir_name,'args.txt'), 'w') as f:
+        json.dump(args.__dict__, f, indent=2)
 
     torch.manual_seed(args.seed)
     torch.cuda.manual_seed_all(args.seed)
@@ -116,6 +118,7 @@ def main():
 
             for t in range(1000): 
                 action = sample_policy.select_action(state, VARIANCE)
+                action = action.flatten()
                 name_str = "expl_var" #explore
                 if args.correct:
                     if num_steps < 200:
@@ -209,6 +212,7 @@ def main():
                 step = 0
                 while not done: # Don't infinite loop while learning
                     action = branch_policy.select_action(state,0)
+                    action = action.flatten()
                     next_state, reward, done, _ = env.step(action)
                     eval_rew += reward
                     branch_buffer.push((state, next_state, action, reward, done, ("eval", i, step))) 
