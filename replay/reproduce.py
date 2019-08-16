@@ -20,7 +20,7 @@ class Net(nn.Module):
         if initialize:
             self.random_initialize()
 
-        self.optimizer = optim.Adam(self.parameters())
+        self.optimizer = optim.RMSprop(self.parameters())
         self.criterion = nn.MSELoss()
 
     def forward(self, x):
@@ -50,8 +50,8 @@ class Net(nn.Module):
             if loss.item() < 1e-3 or e == epoch-1:
                 return loss.item()
 
-def random_sample(network, dim, n, range_=5):
-    x = np.random.rand(n, dim)*(range_*2) - range_ #input range [-10, 10]
+def random_sample(network, dim, n, range_=10):
+    x = np.random.rand(n, dim)*(range_*2) - range_ #input range [-5, 5]
     #x = torch.Tensor(x)
     y = network.select_action(x,0)
     return x, y
@@ -80,12 +80,13 @@ def main():
     print("built target")
     target.play(3)
 
-    for i in range(2,5):
+    for i in range(5,6):
         x,y = random_sample(target, env.observation_space.shape[0], 10**i)
+
         learner = Net(env.observation_space.shape[0],
                 env.action_space.shape[0])
 
-        loss = learner.train(torch.Tensor(x), torch.Tensor(y), epoch = 30000)
+        loss = learner.train(torch.Tensor(x), torch.Tensor(y), epoch = 3000)
         print("Sample size: 10^%d"%i,"Training loss: %.2f"%loss)
 
         r = eval(learner, env, 5)

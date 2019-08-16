@@ -1,0 +1,33 @@
+Fri Aug 16 12:58:24 2019
+ERROR: Shadow framebuffer is not complete, error 0x8cd7
+
+Fri Aug 16 13:00:46 2019
+ERROR: Shadow framebuffer is not complete, error 0x8cd7
+
+Fri Aug 16 13:07:11 2019
+ERROR: Shadow framebuffer is not complete, error 0x8cd7
+
+Fri Aug 16 13:13:55 2019
+ERROR: Shadow framebuffer is not complete, error 0x8cd7
+
+Fri Aug 16 13:22:33 2019
+ERROR: Shadow framebuffer is not complete, error 0x8cd7
+
+Fri Aug 16 13:26:05 2019
+ERROR: Shadow framebuffer is not complete, error 0x8cd7
+
+Fri Aug 16 13:38:21 2019
+ERROR: Shadow framebuffer is not complete, error 0x8cd7
+
+Fri Aug 16 13:39:14 2019
+ERROR: Shadow framebuffer is not complete, error 0x8cd7
+
+Fri Aug 16 13:39:39 2019
+ERROR: Shadow framebuffer is not complete, error 0x8cd7
+
+Fri Aug 16 13:40:13 2019
+ERROR: Shadow framebuffer is not complete, error 0x8cd7
+
+Fri Aug 16 14:25:42 2019
+ERROR: Shadow framebuffer is not complete, error 0x8cd7
+

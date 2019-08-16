@@ -6,8 +6,8 @@ import sys
 import numpy as np
 import torch
 
-from .a2c_ppo_acktr.envs import VecPyTorch, make_vec_envs
-from .a2c_ppo_acktr.utils import get_render_func, get_vec_normalize
+from a2c_ppo_acktr.envs import VecPyTorch, make_vec_envs
+from a2c_ppo_acktr.utils import get_render_func, get_vec_normalize
 
 class Trained_model_wrapper():
     def __init__(self, env_name, load_dir, seed):
@@ -34,7 +34,7 @@ class Trained_model_wrapper():
 
     
     def select_action(self, state, variance): #variance is a dummy
-        normalized = torch.Tensor(self.env.get_normalized([state])).to(self.device)
+        normalized = torch.Tensor(self.env.get_normalized(state)).to(self.device)
         recurrent_hidden_states = torch.zeros(1,self.actor_critic.recurrent_hidden_state_size).to(self.device)
         value, action, _, _ = self.actor_critic.act(normalized, recurrent_hidden_states, torch.zeros(1, 1), deterministic=True)
         return action.detach().cpu().float().numpy()

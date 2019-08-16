@@ -94,6 +94,8 @@ def main():
             VARIANCE = VARIANCE/1.5
             print("Updated Var to: %.3f"%(VARIANCE))
             ep_no_improvement = 0
+            if N_SAMPLES > 1e5:
+                break
         
         if N_SAMPLES >= ITER_STEPS:
             ITER_STEPS = N_SAMPLES*2
