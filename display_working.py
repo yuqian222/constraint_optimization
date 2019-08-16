@@ -1,4 +1,4 @@
-from notebooks.JSAnimation import IPython_display
+from imageio import *
 from matplotlib import animation
 import matplotlib.pyplot as plt
 
@@ -16,35 +16,35 @@ def display_frames_as_gif(frames, name="untitled"):
     def animate(i):
         patch.set_data(frames[i])
 
-    anim = animation.FuncAnimation(plt.gcf(), animate, frames = len(frames), interval=50)
-    anim.save("gifs/%s.gif"%(name), writer='imagemagick', fps=60)
+    #anim = animation.FuncAnimation(plt.gcf(), animate, frames = len(frames), interval=50)
+    #anim.save("gifs/%s.gif"%(name), writer='imagemagick', fps=60)
     #display(IPython_display.display_animation(anim, default_mode='loop'))
+    imageio.mimsave("gifs/%s.gif"%(name),frames)
 
-def getframes(policy, env):
+def getframes(policy, env, n):
     observation = env.reset()
     cum_reward = 0
     frames = []
-    for t in range(1000):
+    for t in range(n):
         # Render into buffer. 
         fr = env.render(mode = 'rgb_array')
-        print(fr)
+        time.sleep(0.1)
         frames.append(fr)
         obs =  torch.from_numpy(observation).unsqueeze(0).float()
         action = policy(obs).detach().numpy()
         observation, reward, done, info = env.step(action)
         cum_reward += reward
+        if t % 20 ==0:
+            print("got to %d"%t)
         if done:
             break
     print("reward: %.3f" % cum_reward)
-    return frames[:steps]
+    return frames
 
 def play(policy, env):
     observation = env.reset()
     cum_reward = 0
-    for t in range(5):
-        
-        fr = env.render(mode = 'rgb_array')
-        print(fr)
+    for t in range(1000):
         obs =  torch.from_numpy(observation).unsqueeze(0).float()
         action = policy(obs).detach().numpy()
         observation, reward, done, info = env.step(action)
@@ -57,16 +57,21 @@ def load_policy(path, env):
     model = Policy_quad(env.observation_space.shape[0],
                 env.action_space.shape[0],
                 num_hidden=24)
-    model.load_state_dict(pickle.load(open(path, "rb" )))
+    sd = pickle.load(open(path, "rb" ))
+    print(sd)
+    model.load_state_dict(sd)
     return model
 
-path = "results/Hopper-v2/imitation-test-08_04_04_32/209_"
+path = "replay/trained_models/209_"
 env = gym.make('Hopper-v2')
-constraints = pickle.load( open( path+"constraints.p", "rb" ))
+constraints = pickle.load(open( path+"constraints.p", "rb" ))
 model = load_policy(path+"policy.p", env)
 
-for i in range(5):
+for i in range(2):
     print(play(model, env))
 
-frames_1000 = getframes(model, env)
-display_frames_as_gif(frames_1000, name="hopper3000")
+frames_1000 = getframes(model, env, 100)
+mimsave("gifs/%s.gif"%("hopper3000"),frames_1000)
+
+
+
