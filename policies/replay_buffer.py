@@ -28,7 +28,9 @@ class Replay_buffer():
             self.ptr = (self.ptr + 1) % self.max_size
         else:
             self.storage.append(data)
+        allx = np.array([x[0] for x in self.storage])
 
+        '''
         self.n += 1
         x = data[0]
         if self.n == 1:
@@ -38,10 +40,12 @@ class Replay_buffer():
             newmean = self.xmean + (x-self.xmean)/self.n
             self.xvar = self.xvar + (x - self.xmean)*(x - newmean) #Welford's algorithm
             self.xman = newmean
-
+        '''
     
     def get_mean_var(self):
-        return self.xmean, self.xvar/(self.n-1)
+        self.xmean = allx.mean(axis=0) 
+        self.xvar = allx.var(axis=0)
+        return self.xmean, self.xvar
 
 
     def clear(self):

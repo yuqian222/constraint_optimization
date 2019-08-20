@@ -174,7 +174,8 @@ def main():
             
         best_tuples = replay_buffer.best_state_actions(top_n_constraints=TOP_N_CONSTRIANTS, by='rewards', discard = True)
         mean, var = replay_buffer.get_mean_var()
-        print(mean, var)
+        print(mean)
+        print(var)
         # sample and solve
         max_policy, max_eval, max_set = sample_policy, sample_eval, best_tuples
 
