@@ -56,9 +56,27 @@ def random_sample(network, dim, n, range_=10):
     y = network.select_action(x,0)
     return x, y
 
+def random_sample_hopper(network, n):
+    dim0 = np.random.rand(n, 1) * 1.6 + 0.3
+    dim1 = np.random.rand(n, 1) * 0.3 - 0.1
+    dim2 = np.random.rand(n, 1) * 1.4 - 1.2
+    dim3 = np.random.rand(n, 1) * 2 -1
+    dim4 = np.random.rand(n, 1) * 2 -1
+    dim5 = np.random.rand(n, 1) * 5
+    dim6 = np.random.rand(n, 1) * 8 - 6
+    dim7 = np.random.rand(n, 1) * 4 - 2
+    dim8 = np.random.rand(n, 1) * 16 - 8
+    dim9 = np.random.rand(n, 1) * 20 - 10
+    dim10 = np.random.rand(n, 1) * 20 -10
+    x = np.column_stack((dim0, dim1, dim2, dim3, dim4, dim5, dim6, dim7, dim8, dim9, dim10))
+    y = network.select_action(x, 0)
+    return x, y
+
+
 def eval(policy, env, n):
     # Evaluate
     eval_rew = []
+    allstates = []
     for i in range(n):
         ep_rew = 0
         state, done = env.reset(), False
@@ -66,6 +84,7 @@ def eval(policy, env, n):
         while not done: # Don't infinite loop while learning
             action = policy(state).detach().numpy()
             next_state, reward, done, _ = env.step(action)
+            allstates.append(next_state)
             ep_rew += reward
             state = next_state
             if done:
@@ -79,18 +98,25 @@ def main():
     target = Trained_model_wrapper("Hopper-v2", "./trained_models/", 567)
     print("built target")
     target.play(3)
+   
+    x_test, y_test = random_sample_hopper(target, 200)
 
-    for i in range(5,6):
-        x,y = random_sample(target, env.observation_space.shape[0], 10**i)
-
+    for i in range(3,7):
+        #print("hidden layer size = %d" % i)
+        print("exp %d"%i)
+        x,y = random_sample_hopper(target, 10**i)
         learner = Net(env.observation_space.shape[0],
-                env.action_space.shape[0])
+                env.action_space.shape[0], num_hidden=60)
 
-        loss = learner.train(torch.Tensor(x), torch.Tensor(y), epoch = 3000)
+        loss = learner.train(torch.Tensor(x), torch.Tensor(y), epoch = 10000)
         print("Sample size: 10^%d"%i,"Training loss: %.2f"%loss)
 
         r = eval(learner, env, 5)
         print(r)
+
+        y_learner = learner(x_test)
+        mse = ((y_test - y_learner.detach().numpy())**2).mean(axis=0)
+        print(mse)
 
 if __name__ == '__main__':
     main()

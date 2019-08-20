@@ -7,7 +7,7 @@ class Replay_buffer():
     '''
     Expects tuples of (state, next_state, action, reward, done, info)
     '''
-    def __init__(self, gamma, max_size=500000):
+    def __init__(self, gamma, max_size=50000):
         
         self.max_size = max_size
         self.gamma = gamma
@@ -17,12 +17,32 @@ class Replay_buffer():
         self.culmulative_rewards = []
         self.td_error = []
 
+        self.xmean = 0
+        self.xvar = 0
+        self.n = 0 
+
     def push(self, data):
-        if len(self.storage) == self.max_size:
+        k = len(self.storage)
+        if k == self.max_size:
             self.storage[int(self.ptr)] = data
             self.ptr = (self.ptr + 1) % self.max_size
         else:
             self.storage.append(data)
+
+        self.n += 1
+        x = data[0]
+        if self.n == 1:
+            self.xmean = x
+            self.xvar = 0
+        else:
+            newmean = self.xmean + (x-self.xmean)/self.n
+            self.xvar = self.xvar + (x - self.xmean)*(x - newmean) #Welford's algorithm
+            self.xman = newmean
+
+    
+    def get_mean_var(self):
+        return self.xmean, self.xvar/(self.n-1)
+
 
     def clear(self):
         self.ptr=0
@@ -102,6 +122,8 @@ class Replay_buffer():
             new_storage = [self.storage[i] for i in ind]
             self.storage = new_storage
         return top_n
+
+
 
 
 def no_0_dist(state, slist):
