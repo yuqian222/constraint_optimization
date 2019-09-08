@@ -1,13 +1,14 @@
 import os, sys, random, torch
 import numpy as np
 from heapq import nlargest
+from policies.normalization import Normalization
 
 
 class Replay_buffer():
     '''
     Expects tuples of (state, next_state, action, reward, done, info)
     '''
-    def __init__(self, gamma, max_size=50000):
+    def __init__(self, gamma, max_size=10000):
         
         self.max_size = max_size
         self.gamma = gamma
@@ -29,23 +30,25 @@ class Replay_buffer():
         else:
             self.storage.append(data)
         allx = np.array([x[0] for x in self.storage])
-
-        '''
-        self.n += 1
-        x = data[0]
-        if self.n == 1:
-            self.xmean = x
-            self.xvar = 0
-        else:
-            newmean = self.xmean + (x-self.xmean)/self.n
-            self.xvar = self.xvar + (x - self.xmean)*(x - newmean) #Welford's algorithm
-            self.xman = newmean
-        '''
     
     def get_mean_var(self):
-        self.xmean = allx.mean(axis=0) 
-        self.xvar = allx.var(axis=0)
-        return self.xmean, self.xvar
+        allx = np.array([x[0] for x in self.storage])
+        self.xmean = np.mean(allx, axis=0) 
+        self.xstd = np.std(allx, axis=0)
+        return self.xmean, self.xstd
+    
+    def get_normalization(self):
+        print("get normalization")
+        X, Y, A, R, D, I = zip(*self.storage)
+        norm = {}
+        norm['obs_mean'] = np.mean(X, axis=0) 
+        norm['obs_std'] = np.std(X, axis=0) 
+        norm['acts_mean'] = np.mean(A, axis=0) 
+        norm['acts_std'] = np.std(A, axis=0)
+        delta = np.array(Y) - np.array(X)
+        norm['delta_mean'] = np.mean(delta, axis=0) 
+        norm['delta_std'] = np.std(delta, axis=0) 
+        return norm
 
 
     def clear(self):

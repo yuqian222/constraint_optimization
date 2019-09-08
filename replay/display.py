@@ -1,3 +1,7 @@
+'''
+Test script to see how well we can reproduce a 
+random given neural policy
+'''
 from imageio import *
 from matplotlib import animation
 import matplotlib.pyplot as plt
@@ -41,12 +45,12 @@ def getframes(policy, env, n):
     print("reward: %.3f" % cum_reward)
     return frames
 
-def play(policy, env):
+def play(policy, env, device):
     observation = env.reset()
     cum_reward = 0
     for t in range(1000):
-        obs =  torch.from_numpy(observation).unsqueeze(0).float()
-        action = policy(obs).detach().numpy()
+        obs =  torch.from_numpy(observation).unsqueeze(0).float().to(device)
+        action = policy(obs).cpu().detach().numpy()
         observation, reward, done, info = env.step(action)
         cum_reward += reward
         if done:
@@ -68,49 +72,30 @@ if __name__ == '__main__':
     path = "results/Hopper-v2/imitation-test-08_04_04_32/209_"
     env = gym.make('Hopper-v2')
     constraints = pickle.load( open( path+"constraints.p", "rb" ))
-    model = load_policy(path+"policy.p", env)
+    model = load_policy(path+"policy.p", env).to(device)
 
-    print("______________209________________")
+    print("______________209________________") # where the learnt result is 3000
     for _ in range(10):
         policy209 = Policy_quad(env.observation_space.shape[0],
                     env.action_space.shape[0],
-                    num_hidden=24)
+                    num_hidden=100).to(device)
         states = torch.Tensor([x[0] for x in constraints])
         actions = torch.Tensor([x[1] for x in constraints])
-        policy209.train(states.to(device), actions.to(device), 5000)
+        policy209.train(states.to(device), actions.to(device), 10000)
 
-        print([play(policy209, env) for _ in range(5)])
+        print([play(policy209, env,device) for _ in range(5)])
 
 
     path = "results/Hopper-v2/imitation-test-08_04_04_32/210_"
     constraints210 = pickle.load( open( path+"constraints.p", "rb" ))
 
-    print("______________210________________")
+    print("______________210________________") # where the learnt result is 1000
     for _ in range(10):
         policy210 = Policy_quad(env.observation_space.shape[0],
                     env.action_space.shape[0],
-                    num_hidden=24)
+                    num_hidden=24).to(device)
         states = torch.Tensor([x[0] for x in constraints210])
         actions = torch.Tensor([x[1] for x in constraints210])
         policy210.train(states.to(device), actions.to(device), 5000)
 
-        print([play(policy210, env) for _ in range(5)])
-
-
-
-
-
-    '''
-    path = "replay/trained_models/209_"
-    env = gym.make('Hopper-v2')
-    constraints = pickle.load(open( path+"constraints.p", "rb" ))
-    model = load_policy(path+"policy.p", env)
-
-    for i in range(2):
-        print(play(model, env))
-
-    frames_1000 = getframes(model, env, 100)
-    mimsave("gifs/%s.gif"%("hopper3000"),frames_1000)
-    '''
-
-
+        print([play(policy210, env,device) for _ in range(5)])

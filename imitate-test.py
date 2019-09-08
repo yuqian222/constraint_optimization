@@ -87,9 +87,9 @@ def main():
 
     for i_episode in count(1):
 
-        # 30 samples per size
-        if ep_no_improvement > 2:
-            N_SAMPLES = N_SAMPLES + 500
+        # 20 samples per size
+        if ep_no_improvement > 1:
+            N_SAMPLES = N_SAMPLES + 50
             TOP_N_CONSTRIANTS = -1 #int(N_SAMPLES*1.5)
             VARIANCE = VARIANCE/1.5
             print("Updated Var to: %.3f"%(VARIANCE))
@@ -112,7 +112,7 @@ def main():
             lowest_rew = []
 
             for t in range(1000): 
-                action = sample_policy.select_action(state, VARIANCE)
+                action = sample_policy.select_action([state], VARIANCE)
                 action = action.flatten()
                 name_str = "expl_var" #explore
                 if args.correct:

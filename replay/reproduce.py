@@ -1,3 +1,7 @@
+'''
+Test script to see how well we can reproduce a 
+random given neural network
+'''
 import torch
 import numpy as np
 import torch.optim as optim
@@ -97,18 +101,18 @@ def main():
     env = gym.make('Hopper-v2')
     target = Trained_model_wrapper("Hopper-v2", "./trained_models/", 567)
     print("built target")
-    target.play(3)
+    target.play(3) # run original
    
     x_test, y_test = random_sample_hopper(target, 200)
 
     for i in range(3,7):
-        #print("hidden layer size = %d" % i)
-        print("exp %d"%i)
+        print("Data size: 10^%d" % i)
+        #print("exp %d"%i)
         x,y = random_sample_hopper(target, 10**i)
         learner = Net(env.observation_space.shape[0],
-                env.action_space.shape[0], num_hidden=60)
+                env.action_space.shape[0], num_hidden=24)
 
-        loss = learner.train(torch.Tensor(x), torch.Tensor(y), epoch = 10000)
+        loss = learner.train(torch.Tensor(x), torch.Tensor(y), epoch = 50000)
         print("Sample size: 10^%d"%i,"Training loss: %.2f"%loss)
 
         r = eval(learner, env, 5)

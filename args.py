@@ -32,8 +32,8 @@ def get_args():
     parser.add_argument('--correct', type=bool, default=False,
                         help='whether to explore corrective actions or not')
 
-    parser.add_argument('--training_epoch', type=int, default=5000,
-                        help='Training epochs for each policy update (default: 5000)')
+    parser.add_argument('--training_epoch', type=int, default=15000,
+                        help='Training epochs for each policy update (default: 15000)')
     
     parser.add_argument('--load_dir', type=str, default="")
     parser.add_argument('--n_samples', type=int, default=0)

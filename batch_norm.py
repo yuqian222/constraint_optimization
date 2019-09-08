@@ -33,7 +33,7 @@ BAD_STATE_VAR = 0.3
 
 # number of trajectories for evaluation
 SAMPLE_TRAJ = 20
-EVAL_TRAJ = 20
+EVAL_TRAJ = 10
 
 
 
@@ -64,9 +64,9 @@ def main():
                             env.action_space.shape[0]).to(device)
     elif args.policy == "nn": #assume it's 2 layer here
         device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-        N_SAMPLES = args.n_samples if args.n_samples>0 else int(env.observation_space.shape[0]*2)
+        N_SAMPLES = args.n_samples if args.n_samples>0 else int(env.observation_space.shape[0]*4)
         LOW_REW_SET = N_SAMPLES*2
-        TOP_N_CONSTRIANTS = int(N_SAMPLES*2)
+        TOP_N_CONSTRIANTS = int(N_SAMPLES*1.5)
         def make_policy(mean, var):
             if mean is not None:
                 mean = torch.Tensor(mean).to(device)
@@ -96,10 +96,10 @@ def main():
     for i_episode in count(1):
 
         # hack
-        if ep_no_improvement > 3:
-            N_SAMPLES = int(N_SAMPLES * 1.5)
+        if ep_no_improvement > 3 and VARIANCE>1e-4:
+            N_SAMPLES = int(N_SAMPLES * 1.2)
             TOP_N_CONSTRIANTS = int(N_SAMPLES*1.5) #-1
-            VARIANCE = VARIANCE/1.5
+            VARIANCE = VARIANCE/1.2
             print("Updated Var to: %.3f"%(VARIANCE))
             ep_no_improvement = 0
 
@@ -172,7 +172,7 @@ def main():
             low_rew_constraints_set = []
 
             
-        best_tuples = replay_buffer.best_state_actions(top_n_constraints=TOP_N_CONSTRIANTS, by='rewards', discard = True)
+        best_tuples = replay_buffer.best_state_actions_replace(top_n_constraints=TOP_N_CONSTRIANTS, by='rewards', discard = True)
         mean, var = replay_buffer.get_mean_var()
         print(mean)
         print(var)
@@ -183,8 +183,10 @@ def main():
 
             branch_policy = make_policy(mean, var)
             branch_buffer = Replay_buffer(args.gamma)
-
-            constraints = random.sample(best_tuples+low_rew_constraints_set, N_SAMPLES)
+            if N_SAMPLES >= len(best_tuples):
+                constraints = best_tuples
+            else:   
+                constraints = random.sample(best_tuples+low_rew_constraints_set, N_SAMPLES)
             print(all_l2_norm(constraints)[:5])
 
             # Get metadata of constraints
@@ -248,6 +250,7 @@ def main():
             ep_no_improvement = 0
         else:
             ep_no_improvement +=1
+
 
 
 def all_l2_norm(constraints):

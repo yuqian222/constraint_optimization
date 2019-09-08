@@ -27,7 +27,7 @@ class Policy_quad_norm(nn.Module):
         self.saved_state = []
         self.rewards = []
 
-        self.optimizer = optim.RMSprop(self.parameters())#, weight_decay=0.001)
+        self.optimizer = optim.Adam(self.parameters())
         self.criterion = nn.MSELoss()
 
         self.mean = mean
