@@ -31,8 +31,8 @@ LOW_REW_SET = 20
 BAD_STATE_VAR = 0.3
 
 # number of trajectories for evaluation
-SAMPLE_TRAJ = 5
-EVAL_TRAJ = 10
+SAMPLE_TRAJ = 8
+EVAL_TRAJ = 6
 prev_X, prev_Y, prev_A = [],[],[]
 
 def main():
@@ -103,6 +103,9 @@ def main():
         while num_steps < iter_steps:
             state = env.reset()
 
+            state_action_rew = []
+            lowest_rew = []
+
             for t in range(1000): 
                 action = sample_policy.select_action(state, VARIANCE)
                 action = action.flatten()
@@ -112,18 +115,39 @@ def main():
 
                 replay_buffer.push((state,next_state,action, reward, done, (name_str, explore_episodes, t))) 
 
+                if args.correct and i_episode>0:
+                    if (args.env == "Hopper-v2" or args.env == "Walker2d-v2") and done:
+                        reward = float('-inf')
+                    if len(lowest_rew) < LOW_REW_SET or (args.env == "Hopper-v2" or args.env == "Walker2d-v2" and done):
+                        state_action_rew.append([state,action,reward])
+                        lowest_rew.append(reward)
+                    elif reward < max(lowest_rew):
+                        state_action_rew = sorted(state_action_rew, key=lambda l: l[2]) #sort by reward
+                        state_action_rew[-1] = [state,action,reward]
+                        lowest_rew.remove(max(lowest_rew))
+                        lowest_rew.append(reward)
+
                 if done:
                     break
+                
                 state = next_state
-
+            
             num_steps += (t-1)
             explore_episodes += 1
 
         explore_rew /= explore_episodes
-
         print('\nEpisode {}\tExplore reward: {:.2f}\tAverage ep len: {:.1f}\n'.format(i_episode, explore_rew, num_steps/explore_episodes))
 
-       
+       # do corrections 
+        low_rew_constraints_set = []
+        if args.correct and i_episode>1:
+            print("exploring better actions")
+
+            #sample possible corrections
+            for s, a, r in state_action_rew:
+                max_a, _ = run_cem(dynamics, s)
+                low_rew_constraints_set.append((s, max_a, "bad_states", 0, 0))
+
         # Train Dynamics
         X, Y, A, _, _, _ = replay_buffer.sample(-1)
 
@@ -144,29 +168,17 @@ def main():
         prev_X, prev_Y, prev_A =  X, Y, A
 
         best_tuples = replay_buffer.best_state_actions_replace(top_n_constraints=TOP_N_CONSTRIANTS, by='rewards', discard = True)
-        
 
-        # do corrections 
-        low_rew_constraints_set = []
-        if args.correct and i_episode>1:
-            bad_exp = replay_buffer.low_rew_set(LOW_REW_SET)
-            print("exploring better actions")
-
-            #sample possible corrections
-            for s, a, _ in bad_exp:
-                max_a, _ = run_cem(dynamics, s)
-                low_rew_constraints_set.append((s, max_a, "bad_states", 0, 0))
-
-        print(TOP_N_CONSTRIANTS)
-        print(len(best_tuples))
-        print(len(low_rew_constraints_set))
-        
         mean, var = replay_buffer.get_mean_var()
 
         # sample and solve
         max_policy, max_eval, max_set = sample_policy, sample_eval, best_tuples
         branch_buffer = Replay_buffer(args.gamma)
 
+        print(TOP_N_CONSTRIANTS)
+        print(len(best_tuples))
+        print(len(low_rew_constraints_set))
+        
         for branch in range(args.branches):
 
             branch_policy = make_policy(mean, var)

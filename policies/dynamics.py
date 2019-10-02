@@ -20,8 +20,6 @@ class Dynamics(nn.Module):
 
         self.obs_dim = self.env.observation_space.shape[0]
         self.acts_dim = self.env.action_space.shape[0]
-        self.ac_ub = self.env.action_space.high
-        self.ac_lb = self.env.action_space.low
         
         self.affine1 = nn.Linear(self.obs_dim +  self.acts_dim, num_hidden)
         self.affine2 = nn.Linear(num_hidden, num_hidden)
@@ -111,6 +109,12 @@ class DynamicsEnsemble(object):
         self.models = []
         self.num_models = num_models
         self.init_dynamic_models(self.env, num_hidden)
+        
+        self.obs_dim = self.env.observation_space.shape[0]
+        self.acts_dim = self.env.action_space.shape[0]
+        
+        self.ac_ub = self.env.action_space.high
+        self.ac_lb = self.env.action_space.low
 
     def init_dynamic_models(self, env, num_hidden):
         for model_index in range(self.num_models):

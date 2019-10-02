@@ -29,10 +29,10 @@ def run_cem(
     lb, ub = np.tile(lb, [horizon]), np.tile(ub, [horizon])
     
     for t in tqdm(range(epochs)):
-        if np.max(var) <= self.epsilon:
+        if np.max(var) <= epsilon:
             break
 
-        lb_dist, ub_dist = mean - self.lb, self.ub - mean
+        lb_dist, ub_dist = mean - lb, ub - mean
         constrained_var = np.minimum(np.minimum(np.square(lb_dist / 2), np.square(ub_dist / 2)), var)
 
         samples = np.random.multivariate_normal(
@@ -52,8 +52,8 @@ def run_cem(
         new_mean = np.mean(elites, axis=0)
         new_var = np.var(elites, axis=0)
 
-        mean = self.alpha * mean + (1 - self.alpha) * new_mean
-        var = self.alpha * var + (1 - self.alpha) * new_var
+        mean = alpha * mean + (1 - alpha) * new_mean
+        var = alpha * var + (1 - alpha) * new_var
 
         t += 1
     
