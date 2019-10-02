@@ -41,9 +41,12 @@ def run_cem(
             size=batch_size
         ).astype(np.float32)
 
+        '''
         with Pool(num_process) as p:
             rewards = p.map(partial(dynamics.shoot_sequence, state=state), samples)
-
+        '''
+        rewards = map(partial(dynamics.shoot_sequence, state=state), samples)
+        
         rewards = np.array(rewards)
 
         indicies = get_elite_indicies(num_elite, rewards)
