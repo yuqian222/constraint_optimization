@@ -1,6 +1,6 @@
 import os, sys, random, torch
 import numpy as np
-from heapq import nlargest
+from heapq import nlargest, nsmallest
 from policies.normalization import Normalization
 
 
@@ -112,7 +112,7 @@ class Replay_buffer():
             candidates = zip(X, A, I, rew, range(len(X)))
 
         if top_n_constraints > 0:
-            top_n_candidate = nlargest(int(len(self.storage)/3), candidates, key=lambda s: s[-2]) #should just sort all, not sure if it's faster
+            top_n_candidate = nlargest(min([top_n_constraints*3, len(X)]), candidates, key=lambda s: s[-2]) #should just sort all, not sure if it's faster
             top_n = []
             top_n_states = []
             for tup in top_n_candidate:
@@ -129,6 +129,29 @@ class Replay_buffer():
             new_storage = [self.storage[i] for i in ind]
             self.storage = new_storage
         return top_n
+
+    def low_rew_set(self, n):
+        X, Y, A, R, D, I = zip(*self.storage)
+        #assume reward is already calculated
+        candidates = zip(X, A, self.culmulative_rewards)
+        smallest_n_can = nsmallest(n*3, candidates, key=lambda s: s[-1])
+        smallest_n = []
+        smallest_n_states = []
+        print('low rew set n', n)
+        print("low res set", len(list(smallest_n_can)))
+        for tup in smallest_n_can:
+            if no_0_dist(tup[0], smallest_n_states):
+                smallest_n.append(tup)
+                smallest_n_states.append(tup[0])
+                if len(smallest_n) > n:
+                    break
+
+        print("low res set after",len(smallest_n))
+
+        return smallest_n
+
+
+
 
 
 

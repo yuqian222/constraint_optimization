@@ -1,4 +1,5 @@
 import numpy as np
+import gym
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -17,15 +18,17 @@ class Dynamics(nn.Module):
         super(Dynamics, self).__init__()
         self.env = env
 
-        self.obs_dim = env.observation_space.shape[0]
-        self.acts_dim = env.action_space.shape[0]
+        self.obs_dim = self.env.observation_space.shape[0]
+        self.acts_dim = self.env.action_space.shape[0]
+        self.ac_ub = self.env.action_space.high
+        self.ac_lb = self.env.action_space.low
         
         self.affine1 = nn.Linear(self.obs_dim +  self.acts_dim, num_hidden)
         self.affine2 = nn.Linear(num_hidden, num_hidden)
         self.affine3 = nn.Linear(num_hidden, self.obs_dim)
 
         self.epsilon = 1e-10
-        self.normlization = Normalization({})
+        self.normlization = {}
         
         self.optimizer = optim.RMSprop(self.parameters())#, weight_decay=0.001)
         self.mse = nn.MSELoss()
@@ -33,6 +36,10 @@ class Dynamics(nn.Module):
     def set_normalization(self, norm):
         norm = {k: torch.Tensor(v) for (k,v) in norm.items()}
         self.normlization = norm
+
+    def normal_to(self, device):
+        self.normlization = {k: v.to(device) for (k,v) in self.normlization.items()}
+
 
     def forward(self, obs, acts):
         delta = self.forward_delta(obs, acts)
@@ -73,10 +80,7 @@ class Dynamics(nn.Module):
 
         return (deltas - self.normlization['delta_mean'])/ (self.normlization['delta_std'] + self.epsilon)
 
-    def train(self, X, Y, A, batch_size = 32, epoch = 300):
-        training_set = dynamics_dataset(X,Y,A)
-        training_generator = DataLoader(training_set,  batch_size=batch_size, shuffle=True)
-
+    def train(self, training_generator, epoch = 300):
         for ep in range(epoch):
             running_loss = []
             for data in training_generator:
@@ -88,8 +92,8 @@ class Dynamics(nn.Module):
                 loss.backward()
                 self.optimizer.step()
                 running_loss.append(loss.item())
-            if ep % 100 == 0 or ep == epoch-1:
-                print("Dynamics trianing: epoch %d, loss = %.3f" %(epoch, sum(running_loss)/len(running_loss)))
+            if ep % 50 == 0 or ep == epoch-1:
+                print("Dynamics trianing: epoch %d, loss = %.3f" %(ep, sum(running_loss)/len(running_loss)))
 
     def get_accuracy(self, X, Y, A):
 
@@ -102,11 +106,11 @@ class Dynamics(nn.Module):
 
 class DynamicsEnsemble(object):
     def __init__(self, env, num_models=1, num_hidden=100):
-        self.env = env
+        self.env = gym.make(env)
         self.ts = 0
         self.models = []
         self.num_models = num_models
-        self.init_dynamic_models(env, num_hidden=num_hidden)
+        self.init_dynamic_models(self.env, num_hidden)
 
     def init_dynamic_models(self, env, num_hidden):
         for model_index in range(self.num_models):
@@ -114,9 +118,19 @@ class DynamicsEnsemble(object):
         print("An ensemble of {} dynamics model initialized".format(self.num_models))
     
     def fit(self, X, Y, A, batch_size = 32, epoch = 100):
+        device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+
+        training_set = dynamics_dataset(X,Y,A, device=device)
+        training_generator = DataLoader(training_set,  batch_size=batch_size, shuffle=True)
+
         for i, model in enumerate(self.models):
+            model.to(device)
+            model.normal_to(device)
             print("fitting model %d in the emsemble" %i)
-            model.train(X, Y, A, batch_size=batch_size, epoch=epoch)
+            model.train(training_generator, epoch=epoch)
+            model.cpu()
+            model.normal_to('cpu')
+
 
     def update_normalization(self, new_normalization):
         for model in self.models:
@@ -127,10 +141,10 @@ class DynamicsEnsemble(object):
         x = torch.Tensor(x)
         if len(x.shape) == 1:
             x = x[None,:] 
-        a =torch.Tensor([a])
+        a = torch.Tensor([a])
         for model in self.models:
             ys.append(model(x,a).detach().numpy())
-        return np.array(ys).mean(axis=0)
+        return np.array(ys).mean(axis=0)[0]
 
 
     def _generate_random_model_indices_for_prediction(self, k):
@@ -139,58 +153,78 @@ class DynamicsEnsemble(object):
         return model_indices
 
 
-    def step(self, actions, use_states=None): #mostly from mbble-metrpo
+    def step(self, action, state): #mostly from mbble-metrpo
         self.ts += 1
-        actions = np.clip(actions, self.env.action_space.low, self.env.action_space.high)
-        next_observations = self.get_next_observation(actions, use_states=use_states)
-        next_observations = np.clip(next_observations, self.env.observation_space.low, self.env.observation_space.high)
-        next_observations = np.clip(next_observations, -1e5, 1e5)
+        action = np.clip(action, self.env.action_space.low, self.env.action_space.high)
+        next_observation = self.predict(state, action)
+        next_observation = np.clip(next_observation, self.env.observation_space.low, self.env.observation_space.high)
+        next_observation = np.clip(next_observation, -1e5, 1e5)
 
-        rewards = 1.0 - 1e-3 * np.square(actions).sum() #only survival
-        self.states = next_observations
-        s = self.states[0]
+        reward, done, d = self.get_rew(state,action) 
+        return next_observation, reward, done, d
 
-        dones = not (self.ts < 998 and
-                     np.isfinite(s).all() and
-                    (np.abs(s[1:]) < 100).all() and
-                    (s[0] > .7) and (abs(s[1]) < .2)) 
-        return self.states, rewards, dones, dict()
+    def to(self, device):
+        for model in self.models:
+            model.to(device)
+
+    def shoot_sequence(self, state, acts):
+        horizon = int(acts.shape[0]/self.acts_dim)
+        acts_ = acts.reshape([horizon, self.acts_dim])
+        state_ = state
+
+        rew = 0
+        for i in range(horizon):
+            next_state, reward, done, _ = self.step(acts_[i], state_)
+            rew += reward
+            state_ = next_state
+            if done:
+                break
+        return rew
 
 
-    def get_next_observation(self, actions, use_states=None):
-        if use_states is not None:
-            return self.predict(use_states, actions)
-        return self.predict(self.states, actions)
+    def shoot(self, state, pi, length=10, num_branches=30):
+        actions = []
+        rews = []
+        self.env.reset()
+
+        for br in range(num_branches):
+            state_ = state
+            rew = 0
+            for i in range(length):
+                action = pi.select_action(state_, 0.5).flatten() #this can be debated
+                if i == 0:
+                    actions.append(action)
+                next_state, reward, done, _ = self.step(action, state_)
+                rew += reward
+                state_ = next_state
+                if done:
+                    break
+            rews.append(rew)
+        best_act = actions[np.argmax(np.array(rews))]
+        return best_act
+    
+    def get_rew(self, state, action):
+        split = int(len(state)/2)
+        qpos = np.concatenate([[0], state[:split]])
+        qval = state[split:]
+        self.env.set_state(qpos, qval)
+        
+        next_state, reward, done, d = self.env.step(action)
+       
+        return reward, done, d
+
 
     def evaluate(self, pi, num_traj = 3):
         eval_rew =0
         for i in range(num_traj):
-            self.ts = 0
             state, done = self.env.reset(), False
-            self.states = [state]
-            while not done: # Don't infinite loop while learning
-                self.ts += 1
-                action = pi.select_action(state,0)
-                action = action.flatten()
-                next_state, reward, done, _ = self.step(action, use_states=state)
-                eval_rew += reward
-                state = next_state
-                if done:
-                    break
-        eval_rew /= num_traj
-        return eval_rew
-
-    def estimate(self, start_state, pi, num_traj = 5):
-        eval_rew =0
-        for i in range(num_traj):
-            self.ts = 0
-            self.states = [start_state]
-            state, done = start_state, False
-            while not done: # Don't infinite loop while learning
-                self.ts += 1
-                action = pi.select_action(state, 0.05)
-                action = action.flatten()
-                next_state, reward, done, _ = self.step(action, use_states=state)
+            for _ in range(999): # Don't infinite loop while learning
+                action = pi.select_action(state,0).flatten()
+                next_state, reward, done, d = self.step(action, state)
+                
+                if 'reward_run' in list(d.keys()):
+                    if abs(d['reward_run']) > 10:
+                        break
                 eval_rew += reward
                 state = next_state
                 if done:
@@ -200,17 +234,15 @@ class DynamicsEnsemble(object):
 
     def get_accuracy(self, X, Y, A):
         return [ev.get_accuracy(X, Y, A) for ev in self.models]
-    #def plan(self):
-
 
 
 
 class dynamics_dataset(Dataset):
-    def __init__(self, x, y, a):
+    def __init__(self, x, y, a, device = 'cpu'):
         if isinstance(x, np.ndarray):
-            x = torch.Tensor(x)
-            y = torch.Tensor(y)
-            a = torch.Tensor(a)
+            x = torch.Tensor(x).to(device)
+            y = torch.Tensor(y).to(device)
+            a = torch.Tensor(a).to(device)
         self.x = Variable(x)
         self.y = Variable(y)
         self.a = Variable(a)

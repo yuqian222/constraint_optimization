@@ -106,7 +106,7 @@ def main():
     x_test, y_test = random_sample_hopper(target, 200)
 
     for i in range(3,7):
-        print("Data size: 10^%d" % i)
+        print("Experiment %d" % i)
         #print("exp %d"%i)
         x,y = random_sample_hopper(target, 10**i)
         learner = Net(env.observation_space.shape[0],

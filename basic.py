@@ -76,22 +76,19 @@ def main():
 
     replay_buffer = Replay_buffer(args.gamma)
 
-    if INIT_WEIGHT:
-        sample_eval = 1300
-        with open("save_1000.p",'rb') as f:
-            params=pickle.load(f)
-            sample_policy.init_weight(params)
-
     ep_no_improvement = 0
-
+    iter_steps = args.iter_steps
 
     for i_episode in count(1):
 
         # hack
-        if ep_no_improvement > 3:
-            N_SAMPLES = int(N_SAMPLES * 1.5)
-            TOP_N_CONSTRIANTS = -1 #int(N_SAMPLES*1.5)
-            VARIANCE = VARIANCE/1.5
+        if ep_no_improvement > 5:
+            N_SAMPLES = int(N_SAMPLES * 1.15)
+            TOP_N_CONSTRIANTS = int(N_SAMPLES*1.2)
+            if TOP_N_CONSTRIANTS > iter_steps:
+                iter_steps = TOP_N_CONSTRIANTS*1.5
+
+            VARIANCE = VARIANCE/1.2
             print("Updated Var to: %.3f"%(VARIANCE))
             ep_no_improvement = 0
 
@@ -100,7 +97,7 @@ def main():
         explore_episodes = 0
         explore_rew =0
 
-        while num_steps < args.iter_steps:
+        while num_steps < iter_steps:
             state = env.reset()
 
             state_action_rew_env = []

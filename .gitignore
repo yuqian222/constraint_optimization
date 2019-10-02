@@ -8,6 +8,8 @@ filewk.lp
 __pycache__/*
 */__pycache__/*
 gifs/*
+*.gif
 *.pyc
 MUJOCO_LOG.TXT
+
 

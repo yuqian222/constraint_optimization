@@ -50,10 +50,11 @@ def main():
 
     num_hidden = args.hidden_size
     VARIANCE = args.var
+    iter_steps = args.iter_steps
     
     # has to be neural network policy
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    N_SAMPLES = args.n_samples if args.n_samples>0 else int(env.observation_space.shape[0]*20)
+    N_SAMPLES = args.n_samples if args.n_samples>0 else int(env.observation_space.shape[0]*2)
     LOW_REW_SET = int(N_SAMPLES*0.2)
     TOP_N_CONSTRIANTS = int(N_SAMPLES*1.5)
     
@@ -78,17 +79,20 @@ def main():
 
     ep_no_improvement = 0
 
-
     for i_episode in count(1):
 
         # hack
-        if ep_no_improvement > 3 and VARIANCE>1e-4:
+        if ep_no_improvement > 3 :
             N_SAMPLES = int(N_SAMPLES * 1.2)
             TOP_N_CONSTRIANTS = int(N_SAMPLES*1.5) #-1
             LOW_REW_SET = int(LOW_REW_SET*1.2)
 
-            VARIANCE = VARIANCE/1.2
-            print("Updated Var to: %.3f"%(VARIANCE))
+            if TOP_N_CONSTRIANTS > iter_steps:
+                iter_steps = TOP_N_CONSTRIANTS*1.5
+
+            if VARIANCE>1e-4:
+                VARIANCE = VARIANCE/1.2
+                print("Updated Var to: %.3f"%(VARIANCE))
             ep_no_improvement = 0
 
         # Exploration
@@ -163,7 +167,7 @@ def main():
         dynamics.fit(X, Y, A, epoch=10)
         print("dynamics eval:", dynamics.evaluate(sample_policy))
             
-        best_tuples = replay_buffer.best_state_actions_replace(top_n_constraints=TOP_N_CONSTRIANTS, by='rewards', discard = True)
+        best_tuples = replay_buffer.best_state_actions(top_n_constraints=TOP_N_CONSTRIANTS, by='rewards', discard = True)
         mean, var = replay_buffer.get_mean_var()
         print(mean)
         print(var)
@@ -177,6 +181,8 @@ def main():
 
             branch_policy = make_policy(mean, var)
 
+            print(len(best_tuples))
+            print(N_SAMPLES)
             constraints = random.sample(best_tuples, N_SAMPLES) + low_rew_constraints_set
             #print(all_l2_norm(constraints)[:5])
 
@@ -263,3 +269,15 @@ def all_l2_norm(constraints):
 
 if __name__ == '__main__':
     main()
+
+
+
+def get_env(env_name):
+    from envs.gym import env_name_to_gym_registry
+    from envs.proxy_env import ProxyEnv
+    unnormalized_env = gym.make(env_name_to_gym_registry[env_name])
+    
+    import builtins
+    builtins.visualize = False
+
+    return ProxyEnv(unnormalized_env)

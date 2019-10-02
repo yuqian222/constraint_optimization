@@ -5,8 +5,6 @@ import torch.optim as optim
 from torch.utils.data import Dataset,DataLoader
 from torch.autograd import Variable
 from torch.distributions import Categorical, Bernoulli
-from tensorboardX import SummaryWriter
-
 
 class Actor_critic(nn.Module):
     def __init__(self, num_inputs, num_outputs, actor, replay_buffer, device, tau=0.7):
@@ -20,7 +18,6 @@ class Actor_critic(nn.Module):
         self.critic_target = Critic(num_inputs, num_outputs).to(device)
 
         self.optimizer = optim.RMSprop(self.critic.parameters(), weight_decay=0.01)
-        #self.writer = SummaryWriter(directory)
 
     def forward(self, s, var):
         return self.actor.select_action(s, var)
