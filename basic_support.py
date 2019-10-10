@@ -6,17 +6,16 @@ from time import gmtime, strftime
 from operator import itemgetter
 import torch.nn as nn
 import torch as F
+import torch.optim as optim
 from torch.utils.data import Dataset,DataLoader
+from torch.autograd import Variable
 from torch.distributions import Categorical, Bernoulli
 from copy import deepcopy
 
 from policies import *
 from args import get_args
-from cem import run_cem
 
 from collections import OrderedDict, Counter
-
-from replay.replay import Trained_model_wrapper
 import sys
 sys.path.append('./replay')
 
@@ -31,13 +30,12 @@ LOW_REW_SET = 20
 BAD_STATE_VAR = 0.3
 
 # number of trajectories for evaluation
-SAMPLE_TRAJ = 8
-EVAL_TRAJ = 6
-prev_X, prev_Y, prev_A = [],[],[]
+SAMPLE_TRAJ = 20
+EVAL_TRAJ = 10
 
 def main():
     args = get_args()
-    dir_name = "results/%s/%s-%s"%(args.env, "dynamics", strftime("%m_%d_%H_%M", gmtime()))
+    dir_name = "results/%s/%s-%s"%(args.env, "basic", strftime("%m_%d_%H_%M", gmtime()))
     os.makedirs(dir_name, exist_ok=True)
     logfile = open(dir_name+"/log.txt", "w")
 
@@ -47,142 +45,143 @@ def main():
     torch.manual_seed(args.seed)
     torch.cuda.manual_seed_all(args.seed)
     env = gym.make(args.env)
-    #env = outer_env.wrapped_env
 
     num_hidden = args.hidden_size
     VARIANCE = args.var
-    iter_steps = args.iter_steps
-    
-    # has to be neural network policy
-    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    N_SAMPLES = args.n_samples if args.n_samples>0 else int(env.observation_space.shape[0]*4)
-    LOW_REW_SET = int(N_SAMPLES*0.2)
-    TOP_N_CONSTRIANTS = int(N_SAMPLES*1.5)
-    
-    def make_policy(mean, var):
-        if mean is not None:
-            mean = torch.Tensor(mean).to(device)
-        if var is not None:
-            var = torch.Tensor(var).to(device)
-        return Policy_quad_norm(env.observation_space.shape[0],
-                            env.action_space.shape[0],
-                            num_hidden=num_hidden, 
-                            mean=mean, 
-                            var=var).to(device)
+
+    # just to make more robust for differnet envs
+    if args.policy == "linear":
+        device = torch.device("cpu")
+        N_SAMPLES = args.n_samples if args.n_samples>0 else int(env.observation_space.shape[0]*1.5)
+        LOW_REW_SET = N_SAMPLES*2
+        TOP_N_CONSTRIANTS = int(N_SAMPLES*1.5)
+        def make_policy():
+            return Policy_lin(env.observation_space.shape[0],
+                            env.action_space.shape[0]).to(device)
+    elif args.policy == "nn": #assume it's 2 layer here
+        device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+        N_SAMPLES = args.n_samples if args.n_samples>0 else int(env.observation_space.shape[0]*2)
+        LOW_REW_SET = N_SAMPLES*2
+        TOP_N_CONSTRIANTS = int(N_SAMPLES*2)
+        def make_policy():
+            return Policy_quad(env.observation_space.shape[0],
+                                env.action_space.shape[0],
+                                num_hidden=num_hidden).to(device)
 
     print('Using device:', device)
 
-    sample_policy, sample_eval = make_policy(None, None), -1700
+    sample_policy, sample_eval = make_policy(), -1700
 
     replay_buffer = Replay_buffer(args.gamma)
 
-    dynamics = DynamicsEnsemble(args.env, num_models=5)
-
     ep_no_improvement = 0
-
+    iter_steps = args.iter_steps
 
     for i_episode in count(1):
 
         # hack
-        if ep_no_improvement > 3:
-            N_SAMPLES = int(N_SAMPLES * 1.2)
-            TOP_N_CONSTRIANTS = int(N_SAMPLES*1.5) #-1
-            LOW_REW_SET = int(LOW_REW_SET*1.2)
-            iter_steps = TOP_N_CONSTRIANTS*2
+        if ep_no_improvement > 5:
+            N_SAMPLES = int(N_SAMPLES * 1.15)
+            TOP_N_CONSTRIANTS = int(N_SAMPLES*1.2)
+            if TOP_N_CONSTRIANTS > iter_steps:
+                iter_steps = TOP_N_CONSTRIANTS*1.5
 
-            if VARIANCE>1e-4:
-                VARIANCE = VARIANCE/1.2
-                print("Updated Var to: %.3f"%(VARIANCE))
+            VARIANCE = VARIANCE/1.2
+            print("Updated Var to: %.3f"%(VARIANCE))
             ep_no_improvement = 0
 
-        print("constraints: {}, to correct: {}".format(N_SAMPLES, TOP_N_CONSTRIANTS))
         # Exploration
         num_steps = 0
         explore_episodes = 0
         explore_rew =0
-        state_action_rew = []
-        lowest_rew = []
 
         while num_steps < iter_steps:
             state = env.reset()
+
+            state_action_rew_env = []
+            lowest_rew = []
+
             for t in range(1000): 
                 action = sample_policy.select_action(state, VARIANCE)
                 action = action.flatten()
                 name_str = "expl_var" #explore
+                if args.correct:
+                    if num_steps < 200:
+                        copied_env = deepcopy(env)
                 next_state, reward, done, _ = env.step(action)
                 explore_rew += reward
 
                 replay_buffer.push((state,next_state,action, reward, done, (name_str, explore_episodes, t))) 
-
-                if args.correct and i_episode>0:
-                    if (args.env == "Hopper-v2" or args.env == "Walker2d-v2") and done:
+                
+                if args.correct:
+                    if (ENV == "Hopper-v2" or ENV == "Walker2d-v2") and done:
                         reward = float('-inf')
-                    if len(state_action_rew) < LOW_REW_SET:# or (args.env == "Hopper-v2" or args.env == "Walker2d-v2" and done):
-                        state_action_rew.append([state,action,reward])
+                    if len(lowest_rew) < LOW_REW_SET or (ENV == "Hopper-v2" or ENV == "Walker2d-v2" and done):
+                        state_action_rew_env.append([state,action,reward,copied_env])
                         lowest_rew.append(reward)
                     elif reward < max(lowest_rew):
-                        state_action_rew = sorted(state_action_rew, key=lambda l: l[2]) #sort by reward
-                        state_action_rew[-1] = [state,action,reward]
+                        state_action_rew_env = sorted(state_action_rew_env, key=lambda l: l[2]) #sort by reward
+                        state_action_rew_env[-1] = [state,action,reward,copied_env]
                         lowest_rew.remove(max(lowest_rew))
                         lowest_rew.append(reward)
 
                 if done:
                     break
-                
                 state = next_state
-            
+
             num_steps += (t-1)
             explore_episodes += 1
 
         explore_rew /= explore_episodes
+
         print('\nEpisode {}\tExplore reward: {:.2f}\tAverage ep len: {:.1f}\n'.format(i_episode, explore_rew, num_steps/explore_episodes))
 
-        # do corrections 
-        low_rew_constraints_set = []
-        if args.correct and i_episode>1:
-            print("exploring better actions", len(state_action_rew))
+        # correction
+        if args.correct:
+            print("exploring better actions")
+            low_rew_constraints_set = []
+
             #sample possible corrections
-            for s, a, r in state_action_rew:
-                max_a, _ = run_cem(dynamics, s)
-                low_rew_constraints_set.append((s, max_a, "bad_states", 0, 0))
+            for s, a, r, saved_env in state_action_rew_env:
+                max_r, max_a = r, a
+                for i in range(20): #sample 20 different actions
+                    step_env = deepcopy(saved_env)
+                    action_explore = sample_policy.select_action(s, BAD_STATE_VAR)
+                    action = action.flatten()
+                    _, reward, done, _ = step_env.step(action_explore)
+                    if reward > max_r and not done:
+                        max_r, max_a = reward, action_explore
+                if max_r - r >= 0.1:
+                    low_rew_constraints_set.append((s, max_a,"bad_states", max_r, 0))
+                    print("improved bad state from %.3f to %.3f" %(r, max_r))
+                if len(low_rew_constraints_set) > N_SAMPLES/3:
+                    break #enough bad correction constraints
+        else:
+            low_rew_constraints_set = []
 
-        # Train Dynamics
-        X, Y, A, _, _, _ = replay_buffer.sample(-1)
-
-        if i_episode!=1:
-            print("Previous model evaluation:", dynamics.get_accuracy(X,Y,A))
-
-        dynamics.update_normalization(replay_buffer.get_normalization())
-        if len(X) <1500:
-            X = np.concatenate([X, prev_X])
-            X = X if len(X)<1500 else X[:1500]
-            Y = np.concatenate([Y, prev_Y])
-            Y = Y if len(Y)<1500 else Y[:1500]
-            A = np.concatenate([A, prev_A])
-            A = A if len(A)<1500 else A[:1500]
-
-        dynamics.fit(X, Y, A, epoch=args.model_training_epoch)
-        
-        prev_X, prev_Y, prev_A =  X, Y, A
-
+            
         best_tuples = replay_buffer.best_state_actions_replace(top_n_constraints=TOP_N_CONSTRIANTS, by='rewards', discard = True)
 
-        mean, var = replay_buffer.get_mean_var()
+        # support
+        num_support = int(N_SAMPLES*0.5)
+        support_states = np.random.uniform(low=-5, high=5, size=[num_support, 
+                                                    env.observation_space.shape[0]])
+        support_actions = sample_policy.select_action(support_states, 0)[0].tolist()
+        support_tuples = [(s, a, "support", 0, 0) for s,a in zip(support_states,support_actions)]
 
         # sample and solve
         max_policy, max_eval, max_set = sample_policy, sample_eval, best_tuples
-        branch_buffer = Replay_buffer(args.gamma)
 
-        print(TOP_N_CONSTRIANTS)
-        print(len(best_tuples))
-        print(len(low_rew_constraints_set))
-        
         for branch in range(args.branches):
 
-            branch_policy = make_policy(mean, var)
+            branch_policy = make_policy()
+            branch_buffer = Replay_buffer(args.gamma)
 
-            constraints = random.sample(best_tuples + low_rew_constraints_set , N_SAMPLES) 
-            #print(all_l2_norm(constraints)[:5])
+            if N_SAMPLES >= len(best_tuples): 
+                constraints = best_tuples
+            else:   
+                constraints = random.sample(best_tuples+low_rew_constraints_set, N_SAMPLES)
+            constraints += support_tuples
 
             # Get metadata of constraints
             states, actions, info, rewards, _ = zip(*constraints)
@@ -193,12 +192,12 @@ def main():
             if isinstance(states[0], torch.Tensor):
                 states = torch.cat(states)
             else:
-                states = torch.Tensor(states)
+                states = torch.tensor(states).float()
             
             if isinstance(actions[0], torch.Tensor):
                 actions = torch.cat(actions)
             else:
-                actions = torch.Tensor(actions)
+                actions = torch.tensor(actions).float()
 
             branch_policy.train(states.to(device), actions.to(device), epoch=args.training_epoch)
            
@@ -221,10 +220,12 @@ def main():
                         break
 
             eval_rew /= EVAL_TRAJ
+
             #log
-            print('Episode {}\tBranch: {}\tEval reward: {:.2f}\tExplore reward: {:.2f}\n'.format(
+            print('Episode {}\tBranch: {}\tEval reward: {:.2f}\tExplore reward: {:.2f}'.format(
                 i_episode, branch, eval_rew, explore_rew))
             logfile.write('Episode {}\tBranch: {}\tConstraints:{}\tEval reward: {:.2f}\n'.format(i_episode, branch, len(constraints), eval_rew))
+
             if eval_rew > max_eval:
                 print("updated to this policy")
                 max_eval, max_policy, max_set = eval_rew, branch_policy, constraints
@@ -244,26 +245,10 @@ def main():
         else:
             ep_no_improvement +=1
 
+        if i_episode>50:
+            break
 
 
-def all_l2_norm(constraints):
-    states, _, _, _ ,_ = zip(*constraints)
-    if isinstance(states[0], torch.Tensor):
-        states = [s.cpu().numpy() for s in states]
-    all_dist = []
-    zerodist = 0
-    for i, x1 in enumerate(states):
-        for x2 in states[i+1:]:
-            d=np.linalg.norm(np.subtract(x1,x2))
-            if d - 0 < 1e-2:
-                zerodist +=1
-            all_dist.append(d)
-    if zerodist > 0 :
-        print("0 distances: %d" % zerodist)
-    return sorted(all_dist)
 
 if __name__ == '__main__':
     main()
-
-
-

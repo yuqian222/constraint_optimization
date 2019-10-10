@@ -37,7 +37,7 @@ prev_X, prev_Y, prev_A = [],[],[]
 
 def main():
     args = get_args()
-    dir_name = "results/%s/%s-%s"%(args.env, "dynamics", strftime("%m_%d_%H_%M", gmtime()))
+    dir_name = "results/%s/%s-%s"%(args.env, "3setup", strftime("%m_%d_%H_%M", gmtime()))
     os.makedirs(dir_name, exist_ok=True)
     logfile = open(dir_name+"/log.txt", "w")
 
@@ -76,7 +76,7 @@ def main():
 
     replay_buffer = Replay_buffer(args.gamma)
 
-    dynamics = DynamicsEnsemble(args.env, num_models=5)
+    dynamics = DynamicsEnsemble(args.env, num_models=3)
 
     ep_no_improvement = 0
 
@@ -169,6 +169,27 @@ def main():
 
         mean, var = replay_buffer.get_mean_var()
 
+        # support
+        num_support = int(N_SAMPLES*0.7)
+        support_states = np.random.uniform(low=-5, high=5, size=[num_support, 
+                                                    env.observation_space.shape[0]])
+        confidence = sorted([(x, dynamics.get_uncertainty(x, 
+                                sample_policy.select_action(x, 0)[0])) 
+                            for x in support_states],
+                            key = lambda t: t[1])
+        support_tuples = []
+        print("confidence here:")
+        print(confidence[:5])
+        sliice = int(len(confidence)/2)
+        for s,_ in confidence[:sliice]:
+                max_a, _ = run_cem(dynamics, s)
+                support_tuples.append((s, max_a, "model", 0, 0))
+
+        for s,_ in confidence[sliice:]:
+            a = sample_policy.select_action(s, 0)[0].tolist()
+            support_tuples.append((s, a, "support", 0, 0))
+
+
         # sample and solve
         max_policy, max_eval, max_set = sample_policy, sample_eval, best_tuples
         branch_buffer = Replay_buffer(args.gamma)
@@ -180,15 +201,19 @@ def main():
         for branch in range(args.branches):
 
             branch_policy = make_policy(mean, var)
+            branch_buffer = Replay_buffer(args.gamma)
 
-            constraints = random.sample(best_tuples + low_rew_constraints_set , N_SAMPLES) 
-            #print(all_l2_norm(constraints)[:5])
+            if N_SAMPLES >= len(best_tuples): 
+                constraints = best_tuples
+            else:   
+                constraints = random.sample(best_tuples+support_tuples, N_SAMPLES)
 
             # Get metadata of constraints
             states, actions, info, rewards, _ = zip(*constraints)
             print("ep %d b %d: %d constraints mean: %.3f  std: %.3f  max: %.3f" % ( i_episode, branch, len(constraints), np.mean(rewards), np.std(rewards), max(rewards)))
             
-            print(len(info))
+            print(info)
+            print(all_l2_norm(constraints)[:5])
 
             if isinstance(states[0], torch.Tensor):
                 states = torch.cat(states)
@@ -219,12 +244,13 @@ def main():
                         env.render()
                     if done:
                         break
-
             eval_rew /= EVAL_TRAJ
+
             #log
-            print('Episode {}\tBranch: {}\tEval reward: {:.2f}\tExplore reward: {:.2f}\n'.format(
+            print('Episode {}\tBranch: {}\tEval reward: {:.2f}\tExplore reward: {:.2f}'.format(
                 i_episode, branch, eval_rew, explore_rew))
             logfile.write('Episode {}\tBranch: {}\tConstraints:{}\tEval reward: {:.2f}\n'.format(i_episode, branch, len(constraints), eval_rew))
+
             if eval_rew > max_eval:
                 print("updated to this policy")
                 max_eval, max_policy, max_set = eval_rew, branch_policy, constraints
@@ -244,6 +270,9 @@ def main():
         else:
             ep_no_improvement +=1
 
+        if i_episode>50:
+            break
+
 
 
 def all_l2_norm(constraints):
@@ -261,6 +290,7 @@ def all_l2_norm(constraints):
     if zerodist > 0 :
         print("0 distances: %d" % zerodist)
     return sorted(all_dist)
+
 
 if __name__ == '__main__':
     main()

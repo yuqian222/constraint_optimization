@@ -37,7 +37,7 @@ prev_X, prev_Y, prev_A = [],[],[]
 
 def main():
     args = get_args()
-    dir_name = "results/%s/%s-%s"%(args.env, "dynamics", strftime("%m_%d_%H_%M", gmtime()))
+    dir_name = "results/%s/%s-%s"%(args.env, "dynamics_rew_sup", strftime("%m_%d_%H_%M", gmtime()))
     os.makedirs(dir_name, exist_ok=True)
     logfile = open(dir_name+"/log.txt", "w")
 
@@ -76,7 +76,7 @@ def main():
 
     replay_buffer = Replay_buffer(args.gamma)
 
-    dynamics = DynamicsEnsemble(args.env, num_models=5)
+    dynamics = DynamicsEnsemble(args.env, num_models=3)
 
     ep_no_improvement = 0
 
@@ -169,6 +169,14 @@ def main():
 
         mean, var = replay_buffer.get_mean_var()
 
+        # support
+        num_support = int(N_SAMPLES*0.5)
+        support_states = np.random.uniform(low=-5, high=5, size=[num_support, 
+                                                    env.observation_space.shape[0]])
+        support_actions = sample_policy.select_action(support_states, 0)[0].tolist()
+        support_tuples = [(s, a, "support", 0, 0) for s,a in zip(support_states,support_actions)]
+
+
         # sample and solve
         max_policy, max_eval, max_set = sample_policy, sample_eval, best_tuples
         branch_buffer = Replay_buffer(args.gamma)
@@ -180,9 +188,14 @@ def main():
         for branch in range(args.branches):
 
             branch_policy = make_policy(mean, var)
+            branch_buffer = Replay_buffer(args.gamma)
 
-            constraints = random.sample(best_tuples + low_rew_constraints_set , N_SAMPLES) 
-            #print(all_l2_norm(constraints)[:5])
+            if N_SAMPLES >= len(best_tuples): 
+                constraints = best_tuples
+            else:   
+                constraints = random.sample(best_tuples+low_rew_constraints_set, N_SAMPLES)
+
+            constraints += support_tuples
 
             # Get metadata of constraints
             states, actions, info, rewards, _ = zip(*constraints)
@@ -219,12 +232,13 @@ def main():
                         env.render()
                     if done:
                         break
-
             eval_rew /= EVAL_TRAJ
+
             #log
-            print('Episode {}\tBranch: {}\tEval reward: {:.2f}\tExplore reward: {:.2f}\n'.format(
+            print('Episode {}\tBranch: {}\tEval reward: {:.2f}\tExplore reward: {:.2f}'.format(
                 i_episode, branch, eval_rew, explore_rew))
             logfile.write('Episode {}\tBranch: {}\tConstraints:{}\tEval reward: {:.2f}\n'.format(i_episode, branch, len(constraints), eval_rew))
+
             if eval_rew > max_eval:
                 print("updated to this policy")
                 max_eval, max_policy, max_set = eval_rew, branch_policy, constraints
@@ -244,23 +258,9 @@ def main():
         else:
             ep_no_improvement +=1
 
+        if i_episode>50:
+            break
 
-
-def all_l2_norm(constraints):
-    states, _, _, _ ,_ = zip(*constraints)
-    if isinstance(states[0], torch.Tensor):
-        states = [s.cpu().numpy() for s in states]
-    all_dist = []
-    zerodist = 0
-    for i, x1 in enumerate(states):
-        for x2 in states[i+1:]:
-            d=np.linalg.norm(np.subtract(x1,x2))
-            if d - 0 < 1e-2:
-                zerodist +=1
-            all_dist.append(d)
-    if zerodist > 0 :
-        print("0 distances: %d" % zerodist)
-    return sorted(all_dist)
 
 if __name__ == '__main__':
     main()

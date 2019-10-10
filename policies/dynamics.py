@@ -53,11 +53,11 @@ class Dynamics(nn.Module):
 
     def normalize_obs_acts(self, obs, acts):
         norm = self.normlization
-        if norm['obs_mean'] is None:
+        if 'obs_mean' not in norm.keys():
             normalized_obs = obs
         else: 
             normalized_obs = (obs - norm['obs_mean']) / (norm['obs_std'] + self.epsilon)
-        if norm['acts_mean'] is None:
+        if 'acts_mean' not in norm.keys():
             normalized_acts = acts
         else:
             normalized_acts = (acts - norm['acts_mean'])/ (norm['acts_std'] + self.epsilon)
@@ -66,7 +66,7 @@ class Dynamics(nn.Module):
 
     def unnormalize_delta(self, normalized_deltas):
 
-        if self.normlization['delta_mean'] is None:
+        if 'delta_mean' not in self.normlization.keys():
             return normalized_deltas
 
         return normalized_deltas * self.normlization['delta_std'] + self.normlization['delta_mean']
@@ -109,7 +109,7 @@ class DynamicsEnsemble(object):
         self.models = []
         self.num_models = num_models
         self.init_dynamic_models(self.env, num_hidden)
-        
+
         self.obs_dim = self.env.observation_space.shape[0]
         self.acts_dim = self.env.action_space.shape[0]
         
@@ -140,7 +140,7 @@ class DynamicsEnsemble(object):
         for model in self.models:
             model.set_normalization(new_normalization)
 
-    def predict(self, x, a): # returns the mean among all models, can also chose a random one                                                                                                                                                                                                                       
+    def predict(self, x, a): # returns the mean among all models, can also chose a random one  
         ys = []
         x = torch.Tensor(x)
         if len(x.shape) == 1:
@@ -149,6 +149,16 @@ class DynamicsEnsemble(object):
         for model in self.models:
             ys.append(model(x,a).detach().numpy())
         return np.array(ys).mean(axis=0)[0]
+
+    def get_uncertainty(self, x, a):
+        ys = []
+        x = torch.Tensor(x)
+        if len(x.shape) == 1:
+            x = x[None,:] 
+        a = torch.Tensor([a])
+        for model in self.models:
+            ys.append(model(x,a).detach().numpy())
+        return np.linalg.norm(np.array(ys).std(axis=0)[0])
 
 
     def _generate_random_model_indices_for_prediction(self, k):
@@ -172,6 +182,7 @@ class DynamicsEnsemble(object):
             model.to(device)
 
     def shoot_sequence(self, state, acts):
+        self.env.reset()
         horizon = int(acts.shape[0]/self.acts_dim)
         acts_ = acts.reshape([horizon, self.acts_dim])
         state_ = state
@@ -212,9 +223,14 @@ class DynamicsEnsemble(object):
         qpos = np.concatenate([[0], state[:split]])
         qval = state[split:]
         self.env.set_state(qpos, qval)
-        
-        next_state, reward, done, d = self.env.step(action)
-       
+        action = np.clip(action, self.ac_lb, self.ac_ub)
+        try:
+            next_state, reward, done, d = self.env.step(action)
+        except:
+            print("error steping")
+            reward = -1
+            done = True
+            d = None
         return reward, done, d
 
 

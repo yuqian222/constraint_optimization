@@ -13,8 +13,8 @@ def get_elite_indicies(num_elite, rewards):
 def run_cem(
         dynamics,
         state,
-        epochs=6,
-        batch_size=2000,
+        epochs=5,
+        batch_size=1200,
         elite_frac=0.2,
         num_process=4,
         horizon=10,
@@ -45,12 +45,12 @@ def run_cem(
         with Pool(num_process) as p:
             rewards = p.map(partial(dynamics.shoot_sequence, state=state), samples)
         '''
-        rewards = map(partial(dynamics.shoot_sequence, state=state), samples)
-        
+        rewards = [dynamics.shoot_sequence(state, a) for a in samples] #list(map(partial(dynamics.shoot_sequence, state), samples))
+
         rewards = np.array(rewards)
 
         indicies = get_elite_indicies(num_elite, rewards)
-        elites = thetas[indicies]
+        elites = samples[indicies]
 
         new_mean = np.mean(elites, axis=0)
         new_var = np.var(elites, axis=0)
@@ -61,3 +61,15 @@ def run_cem(
         t += 1
     
     return mean[:dynamics.acts_dim], mean 
+
+def test_cem():
+    from policies import DynamicsEnsemble
+    dyn = DynamicsEnsemble('Hopper-v2')
+    dummy_state = np.zeros(dyn.obs_dim)
+    act, allacts = run_cem(dyn, dummy_state, epochs=5, batch_size=2000)
+    print(act)
+    print(allacts)
+
+if __name__ == '__main__':
+     test_cem() 
+
