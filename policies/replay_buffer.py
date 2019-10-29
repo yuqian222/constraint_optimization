@@ -87,6 +87,8 @@ class Replay_buffer():
         X, Y, A, R, D, I = zip(*self.storage)
         if by == 'td_error':
             candidates = zip(X, A, I, self.td_error, range(len(X)))
+        elif by == 'one_step':
+            candidates = zip(X, A, I, R, range(len(X)))
         else: # by rewards
             rew = self.calculate_rewards()
             candidates = zip(X, A, I, rew, range(len(X)))
@@ -107,6 +109,8 @@ class Replay_buffer():
         X, Y, A, R, D, I = zip(*self.storage)
         if by == 'td_error':
             candidates = zip(X, A, I, self.td_error, range(len(X)))
+        elif by == 'one_step':
+            candidates = zip(X, A, I, R, range(len(X)))
         else: # by rewards
             rew = self.calculate_rewards()
             candidates = zip(X, A, I, rew, range(len(X)))

@@ -227,7 +227,7 @@ class DynamicsEnsemble(object):
         try:
             next_state, reward, done, d = self.env.step(action)
         except:
-            print("error steping")
+            print("error stepping")
             reward = -1
             done = True
             d = None

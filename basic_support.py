@@ -35,7 +35,7 @@ EVAL_TRAJ = 10
 
 def main():
     args = get_args()
-    dir_name = "results/%s/%s-%s"%(args.env, "basic", strftime("%m_%d_%H_%M", gmtime()))
+    dir_name = "results/%s/%s-%s"%(args.env, "basic_support", strftime("%m_%d_%H_%M", gmtime()))
     os.makedirs(dir_name, exist_ok=True)
     logfile = open(dir_name+"/log.txt", "w")
 

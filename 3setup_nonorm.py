@@ -137,7 +137,7 @@ def main():
         explore_rew /= explore_episodes
         print('\nEpisode {}\tExplore reward: {:.2f}\tAverage ep len: {:.1f}\n'.format(i_episode, explore_rew, num_steps/explore_episodes))
 
-        # do corrections 
+        # do corrections. 
         low_rew_constraints_set = []
         if args.correct and i_episode>1:
             print("exploring better actions", len(state_action_rew))
@@ -152,7 +152,6 @@ def main():
         if i_episode!=1:
             print("Previous model evaluation:", dynamics.get_accuracy(X,Y,A))
 
-        dynamics.update_normalization(replay_buffer.get_normalization())
         if len(X) <1500:
             X = np.concatenate([X, prev_X])
             X = X if len(X)<1500 else X[:1500]
@@ -199,7 +198,7 @@ def main():
         
         for branch in range(args.branches):
 
-            branch_policy = make_policy(mean, var)
+            branch_policy = make_policy(None, None)
             branch_buffer = Replay_buffer(args.gamma)
 
             if N_SAMPLES >= len(best_tuples): 
@@ -212,7 +211,6 @@ def main():
             print("ep %d b %d: %d constraints mean: %.3f  std: %.3f  max: %.3f" % ( i_episode, branch, len(constraints), np.mean(rewards), np.std(rewards), max(rewards)))
             
             print(info)
-            print(all_l2_norm(constraints)[:5])
 
             if isinstance(states[0], torch.Tensor):
                 states = torch.cat(states)
