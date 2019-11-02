@@ -13,8 +13,10 @@ from torch.distributions import Categorical, Bernoulli
 
 
 class Policy_quad(nn.Module):
-    def __init__(self, num_inputs, num_outputs, num_hidden=24, initialize=True):
+    def __init__(self, num_inputs, num_outputs, num_hidden=24, discrete=False, initialize=True):
         super(Policy_quad, self).__init__()
+        
+        self.discrete = discrete
 
         self.affine1 = nn.Linear(num_inputs, num_hidden)
         self.affine2 = nn.Linear(num_hidden, num_hidden)
@@ -41,10 +43,15 @@ class Policy_quad(nn.Module):
                 x = torch.from_numpy(x).unsqueeze(0).float().to(next(self.parameters()).device)
             
             a = self.forward(x)
-
             if noise != 0:
-                noise = Variable(a.data.new(a.size()).normal_(0, noise))
-                a = a + noise
+                if self.discrete: #only for acrobot now
+                    p = torch.Tensor([noise, noise, noise])
+                    index = a+1
+                    p[index.long()] = 1 - 2*noise
+                    a = torch.multinomial(p, 1)[0] - 1
+                else:
+                    noise = Variable(a.data.new(a.size()).normal_(0, noise))
+                    a = a + noise
 
         return a.data.cpu().numpy()
         
@@ -53,6 +60,8 @@ class Policy_quad(nn.Module):
         x = torch.tanh(self.affine1(x))
         x = torch.tanh(self.affine2(x))
         a = self.affine3(x)
+        if self.discrete:
+            a = torch.tanh(a).round()[0][0]
         return a
     
     def train(self, x, y, epoch = 1):

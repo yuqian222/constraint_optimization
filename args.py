@@ -8,7 +8,7 @@ def get_args():
     parser.add_argument('--seed', type=int, default=543, metavar='N',
                         help='random seed (default: 543)')
 
-    parser.add_argument('--render', action='store_true', default=False,
+    parser.add_argument('--render', action='store_true',
                         help='render the environment')
 
     parser.add_argument('--env', type=str, default='HalfCheetah-v2',

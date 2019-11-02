@@ -32,7 +32,7 @@ BAD_STATE_VAR = 0.3
 # number of trajectories for evaluation
 SAMPLE_TRAJ = 20
 EVAL_TRAJ = 10
-
+DISCRETE = False
 
 
 def main():
@@ -65,10 +65,17 @@ def main():
         N_SAMPLES = args.n_samples if args.n_samples>0 else int(env.observation_space.shape[0]*2)
         LOW_REW_SET = N_SAMPLES*2
         TOP_N_CONSTRIANTS = int(N_SAMPLES*2)
-        def make_policy():
-            return Policy_quad(env.observation_space.shape[0],
-                                env.action_space.shape[0],
-                                num_hidden=num_hidden).to(device)
+        if len(env.action_space.shape) == 0:
+            DISCRETE = True
+            def make_policy():
+                return Policy_quad(env.observation_space.shape[0],
+                            1,
+                            num_hidden=num_hidden, discrete=True).to(device)
+        else:
+            def make_policy():
+                return Policy_quad(env.observation_space.shape[0],
+                            env.action_space.shape[0],
+                            num_hidden=num_hidden).to(device)
 
     print('Using device:', device)
 
@@ -105,7 +112,8 @@ def main():
 
             for t in range(1000): 
                 action = sample_policy.select_action(state, VARIANCE)
-                action = action.flatten()
+                if not DISCRETE:
+                    action = action.flatten()
                 name_str = "expl_var" #explore
                 if args.correct:
                     if num_steps < 200:
@@ -202,7 +210,9 @@ def main():
                 step = 0
                 while not done: # Don't infinite loop while learning
                     action = branch_policy.select_action(state,0)
-                    action = action.flatten()
+                    if not DISCRETE:
+                        action = action.flatten()
+
                     next_state, reward, done, _ = env.step(action)
                     eval_rew += reward
                     branch_buffer.push((state, next_state, action, reward, done, ("eval", i, step))) 

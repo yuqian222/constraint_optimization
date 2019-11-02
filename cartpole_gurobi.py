@@ -194,19 +194,19 @@ def initializeLimits(policy_net, limits, prob):
 
 
 def main():
-    running_reward = 10
-    myround = 0
-
+    total_ts = 0
     my_states = {}
     initLimits = []
     merged_s = {}
-    prob = Model("mip1")
 
+    rewards = []
+
+    prob = Model("mip1")
     firstParam = initializeLimits(policy, initLimits, prob)
 
     for i_episode in count(1):
         state = env.reset()
-        for t in range(10000):
+        for t in range(1000):
             action = select_action(state)
             state, reward, done, _ = env.step(action)
             if args.render:
@@ -214,11 +214,13 @@ def main():
             policy.rewards.append(reward)
             if done:
                 break
+        
+        total_ts += t
+        rewards.append(t)
+        finish_episode(i_episode, my_states)
 
-        running_reward = running_reward * 0.99 + t * 0.01
-        finish_episode(myround, my_states)
-
-        if myround > 0 and myround % 200 == 0:
+        if i_episode > 1 and i_episode % 100 == 0:
+            running_reward = np.mean(rewards)
 
             if running_reward > 150:
                 prob = solveNetwork(my_states, policy, firstParam, 1, prob)
@@ -236,24 +238,19 @@ def main():
                 print("Infeasible!!!")
                 break
 
-            my_states = {}
+            rewards = []
+            #my_states = {}
 
             prob = Model("mip1")
             firstParam = initializeLimits(policy, initLimits, prob)
 
-        # if myround > 0 and myround % 1000 == 0:
-        #     my_states = {}
-
-
-        myround += 1
-
-        if myround > 1 and myround % 10 == 0:
-            print('Episode {}\tLast length: {:5d}\tAverage length: {:.2f}'.format(
-                i_episode, t, running_reward))
-        if running_reward > env.spec.reward_threshold:
-            print("Solved! Running reward is now {} and "
-                  "the last episode runs to {} time steps!".format(running_reward, t))
-            break
+            if i_episode > 1 and i_episode % 10 == 0:
+                print('Episode {}\tTotal ts: {:5d}\tAverage length: {:.2f}'.format(
+                    i_episode, total_ts, running_reward))
+            if running_reward > env.spec.reward_threshold:
+                print("Solved! Running reward is now {} and "
+                      "the last episode runs to {} time steps!".format(running_reward, t))
+                break
 
 
 if __name__ == '__main__':
