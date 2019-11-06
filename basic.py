@@ -32,10 +32,10 @@ BAD_STATE_VAR = 0.3
 # number of trajectories for evaluation
 SAMPLE_TRAJ = 20
 EVAL_TRAJ = 10
-DISCRETE = False
-
 
 def main():
+    DISCRETE = False
+
     args = get_args()
     dir_name = "results/%s/%s-%s"%(args.env, "basic", strftime("%m_%d_%H_%M", gmtime()))
     os.makedirs(dir_name, exist_ok=True)
