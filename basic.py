@@ -31,7 +31,7 @@ BAD_STATE_VAR = 0.3
 
 # number of trajectories for evaluation
 SAMPLE_TRAJ = 20
-EVAL_TRAJ = 10
+EVAL_TRAJ = 1
 
 def main():
     DISCRETE = False
@@ -106,34 +106,19 @@ def main():
 
         while num_steps < iter_steps:
             state = env.reset()
-
             state_action_rew_env = []
             lowest_rew = []
-
+            name_str = "expl_var" #explore
             for t in range(1000): 
                 action = sample_policy.select_action(state, VARIANCE)
                 if not DISCRETE:
                     action = action.flatten()
-                name_str = "expl_var" #explore
-                if args.correct:
-                    if num_steps < 200:
-                        copied_env = deepcopy(env)
                 next_state, reward, done, _ = env.step(action)
+                if args.render:
+                    env.render()
                 explore_rew += reward
 
                 replay_buffer.push((state,next_state,action, reward, done, (name_str, explore_episodes, t))) 
-                
-                if args.correct:
-                    if (ENV == "Hopper-v2" or ENV == "Walker2d-v2") and done:
-                        reward = float('-inf')
-                    if len(lowest_rew) < LOW_REW_SET or (ENV == "Hopper-v2" or ENV == "Walker2d-v2" and done):
-                        state_action_rew_env.append([state,action,reward,copied_env])
-                        lowest_rew.append(reward)
-                    elif reward < max(lowest_rew):
-                        state_action_rew_env = sorted(state_action_rew_env, key=lambda l: l[2]) #sort by reward
-                        state_action_rew_env[-1] = [state,action,reward,copied_env]
-                        lowest_rew.remove(max(lowest_rew))
-                        lowest_rew.append(reward)
 
                 if done:
                     break
@@ -145,28 +130,8 @@ def main():
         explore_rew /= explore_episodes
 
         print('\nEpisode {}\tExplore reward: {:.2f}\tAverage ep len: {:.1f}\n'.format(i_episode, explore_rew, num_steps/explore_episodes))
-
-        if args.correct:
-            print("exploring better actions")
-            low_rew_constraints_set = []
-
-            #sample possible corrections
-            for s, a, r, saved_env in state_action_rew_env:
-                max_r, max_a = r, a
-                for i in range(20): #sample 20 different actions
-                    step_env = deepcopy(saved_env)
-                    action_explore = sample_policy.select_action(s, BAD_STATE_VAR)
-                    action = action.flatten()
-                    _, reward, done, _ = step_env.step(action_explore)
-                    if reward > max_r and not done:
-                        max_r, max_a = reward, action_explore
-                if max_r - r >= 0.1:
-                    low_rew_constraints_set.append((s, max_a,"bad_states", max_r, 0))
-                    print("improved bad state from %.3f to %.3f" %(r, max_r))
-                if len(low_rew_constraints_set) > N_SAMPLES/3:
-                    break #enough bad correction constraints
-        else:
-            low_rew_constraints_set = []
+    
+        low_rew_constraints_set = []
 
             
         best_tuples = replay_buffer.best_state_actions_replace(top_n_constraints=TOP_N_CONSTRIANTS, by='rewards', discard = True)
@@ -187,6 +152,7 @@ def main():
 
             # Get metadata of constraints
             states, actions, info, rewards, _ = zip(*constraints)
+            print(actions)
             print("ep %d b %d: %d constraints mean: %.3f  std: %.3f  max: %.3f" % ( i_episode, branch, len(constraints), np.mean(rewards), np.std(rewards), max(rewards)))
             
             print(len(info))
@@ -196,10 +162,13 @@ def main():
             else:
                 states = torch.tensor(states).float()
             
-            if isinstance(actions[0], torch.Tensor):
-                actions = torch.cat(actions)
+            if DISCRETE:
+                actions = torch.tensor(np.array(actions))
             else:
-                actions = torch.tensor(actions).float()
+                if isinstance(actions[0], torch.Tensor):
+                    actions = torch.cat(actions)
+                else:
+                    actions = torch.tensor(actions).float()
 
             branch_policy.train(states.to(device), actions.to(device), epoch=args.training_epoch)
            
@@ -212,8 +181,12 @@ def main():
                     action = branch_policy.select_action(state,0)
                     if not DISCRETE:
                         action = action.flatten()
+                    else:
+                        action = int(action)
 
                     next_state, reward, done, _ = env.step(action)
+                    if args.render:
+                        env.render()
                     eval_rew += reward
                     branch_buffer.push((state, next_state, action, reward, done, ("eval", i, step))) 
                     state = next_state

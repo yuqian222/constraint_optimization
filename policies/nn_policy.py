@@ -64,12 +64,12 @@ class Policy_quad(nn.Module):
             a = torch.tanh(a).round()[0][0]
         return a
     
-    def train(self, x, y, epoch = 1):
+    def train(self, x, y, epoch = 1, tol=1e-4):
         tol = torch.Tensor([5*1e-4])
         prev_loss = torch.Tensor([0])
         for e in range(epoch):
             pred = self.forward(x).squeeze()
-            loss = self.criterion(pred, y)
+            loss = self.criterion(pred, y.float())
             
             self.optimizer.zero_grad()
             loss.backward(retain_graph=True)
@@ -77,13 +77,15 @@ class Policy_quad(nn.Module):
                        
             if e % 500 == 0:
                 print("Policy trianing: epoch %d, loss = %.3f" %(e, loss.item()))
-            if torch.abs(prev_loss-loss) < tol:
+            if torch.abs(prev_loss - loss).item() < tol:
                 print("converged: epoch %d, loss = %.3f" %(e, loss.item()))
                 return
             elif e == epoch-1:
                 print("max iter: epoch %d, loss = %.3f" %(e, loss.item()))
                 return
-        prev_loss = loss
+            
+            prev_loss = loss
+
 
     def clean(self):
         del self.saved_state[:]
@@ -99,51 +101,3 @@ class value_dataset(Dataset):
         return self.x.shape[0]
     def __getitem__(self, idx):
         return {"x": self.x[idx], "y": self.y[idx]}
-
-class Value(nn.Module):
-    def __init__(self, num_inputs, num_hidden=24):
-        super(Value, self).__init__()
-        self.affine1 = nn.Linear(num_inputs, num_hidden)
-        self.affine2 = nn.Linear(num_hidden, num_hidden)
-        self.affine3 = nn.Linear(num_hidden, num_hidden)
-        self.value_head = nn.Linear(num_hidden, 1)
-        self.value_head.weight.data.mul_(0.1)
-        self.value_head.bias.data.mul_(0.0)
-
-        self.optimizer = optim.RMSprop(self.parameters(), weight_decay=0.0005)
-        self.criterion = nn.MSELoss()
-
-    def forward(self, x):
-        x = torch.tanh(self.affine1(x))
-        x = torch.tanh(self.affine2(x))
-        x = torch.tanh(self.affine3(x))
-        state_values = self.value_head(x)
-        return state_values
-
-    def train(self, x, y, batch_size = 5, epoch = 3):
-        training_set = value_dataset(x, y)
-        training_generator = DataLoader(training_set,  batch_size= batch_size, shuffle=True)
-        for epoch in range(epoch):
-            running_loss = 0
-            for data in training_generator:
-                pred = self.forward(data["x"]).squeeze()
-                loss = self.criterion(pred, data["y"])
-                self.optimizer.zero_grad()
-                loss.backward()
-                self.optimizer.step()
-                running_loss += loss.item()
-            print("value trianing: epoch %d, ave. loss = %.3f" %(epoch, running_loss/len(training_generator)))
-
-    def calculate_action_grad(self, state, action, rew_delta=0.01, step_size = 0.005): 
-        #only make sense if this is used as q function
-        if step_size == 0:
-            return action
-        action_var = torch.autograd.Variable(action, requires_grad=True)
-        input_tensor = torch.cat((state, action_var))
-        desired = self(input_tensor) + rew_delta
-        desired.backward()
-        grad_norm = torch.norm(action_var.grad).detach()
-        step = step_size*(action_var.grad/grad_norm)
-        if torch.isnan(step).any():
-            return action
-        return action + step
