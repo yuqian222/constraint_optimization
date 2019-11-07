@@ -42,7 +42,7 @@ class Policy_quad(nn.Module):
             if isinstance(x, np.ndarray):
                 x = torch.from_numpy(x).unsqueeze(0).float().to(next(self.parameters()).device)
             
-            a = self.forward(x)
+            a = self.forward(x).round()
             if noise != 0:
                 if self.discrete: #only for acrobot now
                     p = torch.Tensor([noise, noise, noise])
@@ -61,7 +61,7 @@ class Policy_quad(nn.Module):
         x = torch.tanh(self.affine2(x))
         a = self.affine3(x)
         if self.discrete:
-            a = torch.tanh(a).round()[0][0]
+            a = torch.tanh(a)[0][0]
         return a
     
     def train(self, x, y, epoch = 1, tol=1e-4):

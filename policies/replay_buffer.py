@@ -30,6 +30,10 @@ class Replay_buffer():
         else:
             self.storage.append(data)
         allx = np.array([x[0] for x in self.storage])
+
+    def append(self, buf):
+        for data in buf.storage:
+            self.push(data)
     
     def get_mean_var(self):
         allx = np.array([x[0] for x in self.storage])
@@ -49,7 +53,6 @@ class Replay_buffer():
         norm['delta_mean'] = np.mean(delta, axis=0) 
         norm['delta_std'] = np.std(delta, axis=0) 
         return norm
-
 
     def clear(self):
         self.ptr=0

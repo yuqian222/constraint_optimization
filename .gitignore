@@ -11,5 +11,6 @@ gifs/*
 *.gif
 *.pyc
 MUJOCO_LOG.TXT
-
-
+notebooks/logs/*
+notebooks/log/*
+notebooks/.ipynb_checkpoints/*

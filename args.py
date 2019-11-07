@@ -11,6 +11,9 @@ def get_args():
     parser.add_argument('--render', action='store_true',
                         help='render the environment')
 
+    parser.add_argument('--keep_buffer', action='store_true',
+                        help='keep buffer')
+
     parser.add_argument('--env', type=str, default='HalfCheetah-v2',
                         help='enviornment (default: HalfCheetah-v2)')
 

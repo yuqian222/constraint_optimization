@@ -63,6 +63,7 @@ def main():
     elif args.policy == "nn": #assume it's 2 layer here
         device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
         N_SAMPLES = args.n_samples if args.n_samples>0 else int(env.observation_space.shape[0]*2)
+        print(env.observation_space.shape[0])
         LOW_REW_SET = N_SAMPLES*2
         TOP_N_CONSTRIANTS = int(N_SAMPLES*2)
         if len(env.action_space.shape) == 0:
@@ -87,6 +88,9 @@ def main():
     iter_steps = args.iter_steps
 
     for i_episode in count(1):
+        if DISCRETE:
+            if i_episode == 2:
+                VARIANCE = VARIANCE/3
 
         # hack
         if ep_no_improvement > 5:
@@ -206,7 +210,10 @@ def main():
             if eval_rew > max_eval:
                 print("updated to this policy")
                 max_eval, max_policy, max_set = eval_rew, branch_policy, constraints
-                replay_buffer = branch_buffer
+                if args.keep_buffer:
+                    replay_buffer.append(branch_buffer)
+                else:
+                    replay_buffer = branch_buffer
 
         # the end of branching
         if max_eval > sample_eval:

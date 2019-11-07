@@ -27,7 +27,7 @@ BIAS_BOUND = 0.05
 
 args = parser.parse_args()
 
-env = gym.make('CartPole-v0')
+env = gym.make('MountainCar-v0')
 env.seed(args.seed)
 torch.manual_seed(args.seed)
 
@@ -99,7 +99,7 @@ def finish_episode(myround, my_states):
 
 
 def solveNetwork(my_states, policy_net, firstParam, set, prob):
-    hidden_size = 20
+    hidden_size = 80
     count = 0
 
     if (len(my_states) == 0):
