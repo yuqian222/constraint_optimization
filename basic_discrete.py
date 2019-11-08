@@ -34,7 +34,6 @@ SAMPLE_TRAJ = 20
 EVAL_TRAJ = 1
 
 def main():
-
     args = get_args()
     dir_name = "results/%s/%s-%s"%(args.env, "basic", strftime("%m_%d_%H_%M", gmtime()))
     os.makedirs(dir_name, exist_ok=True)
@@ -45,6 +44,7 @@ def main():
 
     torch.manual_seed(args.seed)
     torch.cuda.manual_seed_all(args.seed)
+    
     env = gym.make(args.env)
 
     num_hidden = args.hidden_size
@@ -67,9 +67,17 @@ def main():
         TOP_N_CONSTRIANTS = int(N_SAMPLES*2)
         
         def make_policy():
-            return Policy_quad(env.observation_space.shape[0],
-                        env.action_space.shape[0],
-                        num_hidden=num_hidden).to(device)
+            return Policy_quad_classification(env.observation_space.shape[0],
+                        env.action_space.n, num_hidden=num_hidden).to(device)
+        
+        def take_action(ind, env=args.env):
+            if env == 'Acrobot-v1' or 'MountainCar-v0':
+                acts = [-1, 0 , 1]
+                return acts[int(ind)]
+            else:
+                raise NotImplementedError
+
+
 
     print('Using device:', device)
 
@@ -81,6 +89,7 @@ def main():
     iter_steps = args.iter_steps
 
     for i_episode in count(1):
+
         # hack
         if ep_no_improvement > 5:
             N_SAMPLES = int(N_SAMPLES * 1.15)
@@ -103,13 +112,13 @@ def main():
             lowest_rew = []
             name_str = "expl_var" #explore
             for t in range(1000): 
-                action = sample_policy.select_action(state, VARIANCE).flatten()
-                next_state, reward, done, _ = env.step(action)
+                ind = sample_policy.select_action(state, VARIANCE)
+                next_state, reward, done, _ = env.step(take_action(ind))
                 if args.render:
                     env.render()
                 explore_rew += reward
 
-                replay_buffer.push((state,next_state,action, reward, done, (name_str, explore_episodes, t))) 
+                replay_buffer.push((state, next_state, ind, reward, done, (name_str, explore_episodes, t))) 
 
                 if done:
                     break
@@ -152,12 +161,8 @@ def main():
                 states = torch.cat(states)
             else:
                 states = torch.tensor(states).float()
-
-            if isinstance(actions[0], torch.Tensor):
-                actions = torch.cat(actions)
-            else:
-                actions = torch.tensor(actions).float()
-
+            
+            actions = torch.tensor(np.array(actions))
             branch_policy.train(states.to(device), actions.to(device), epoch=args.training_epoch)
            
             # Evaluate
@@ -165,13 +170,16 @@ def main():
             for i in range(EVAL_TRAJ):
                 state, done = env.reset(), False
                 step = 0
-                while not done: # Don't infinite loop while learning
-                    action = branch_policy.select_action(state,0).flatten()
+                while not done:
+
+                    ind = sample_policy.select_action(state, VARIANCE)
+                    next_state, reward, done, _ = env.step(take_action(ind))
+
                     next_state, reward, done, _ = env.step(action)
                     if args.render:
                         env.render()
                     eval_rew += reward
-                    branch_buffer.push((state, next_state, action, reward, done, ("eval", i, step))) 
+                    branch_buffer.push((state, next_state, ind, reward, done, ("eval", i, step))) 
                     state = next_state
                     step += 1
                     if args.render:

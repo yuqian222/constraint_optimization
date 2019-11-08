@@ -12,9 +12,11 @@ from torch.autograd import Variable
 from torch.distributions import Categorical, Bernoulli
 
 
-class Policy_quad(nn.Module):
+class Policy_quad_classification(nn.Module):
     def __init__(self, num_inputs, num_outputs, num_hidden=24, initialize=True):
-        super(Policy_quad, self).__init__()
+        super(Policy_quad_classification, self).__init__()
+        print(num_inputs)
+        print(num_outputs)
 
         self.affine1 = nn.Linear(num_inputs, num_hidden)
         self.affine2 = nn.Linear(num_hidden, num_hidden)
@@ -28,7 +30,7 @@ class Policy_quad(nn.Module):
         self.rewards = []
 
         self.optimizer = optim.Adam(self.parameters())
-        self.criterion = nn.MSELoss()
+        self.criterion = nn.CrossEntropyLoss()
 
     def random_initialize(self):
         for l in [self.affine1, self.affine2, self.affine3]:
@@ -40,16 +42,16 @@ class Policy_quad(nn.Module):
             if isinstance(x, np.ndarray):
                 x = torch.from_numpy(x).unsqueeze(0).float().to(next(self.parameters()).device)
             
-            a = self.forward(x).round()
-            if noise != 0:
-                    noise = Variable(a.data.new(a.size()).normal_(0, noise))
-                    a = a + noise
-
-        return a.data.cpu().numpy()
-
+            a = self.forward(x)
+            if noise == 0:
+                a = torch.max(a, 1)
+            else:
+                a = torch.multinomial(F.normalize(a), 1)
+        return a.data.cpu().numpy()[0]
+        
     def forward(self, x):
-        x = torch.tanh(self.affine1(x))
-        x = torch.tanh(self.affine2(x))
+        x = torch.relu(self.affine1(x))
+        x = torch.relu(self.affine2(x))
         a = self.affine3(x)
         return a
     
@@ -57,8 +59,10 @@ class Policy_quad(nn.Module):
         tol = torch.Tensor([5*1e-4])
         prev_loss = torch.Tensor([0])
         for e in range(epoch):
-            pred = self.forward(x).squeeze()
-            loss = self.criterion(pred, y.float())
+            pred = self.forward(x)
+            loss = self.criterion(pred, y)
+            print(pred)
+            print(y)
             
             self.optimizer.zero_grad()
             loss.backward(retain_graph=True)
