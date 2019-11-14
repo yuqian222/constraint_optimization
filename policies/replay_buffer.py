@@ -108,7 +108,7 @@ class Replay_buffer():
         return top_n
 
 
-    def best_state_actions_replace(self, top_n_constraints=-1, by='reward', discard = False):
+    def best_state_actions_replace(self, top_n_constraints=-1, by='reward', tol=1e-4, discard = False):
         X, Y, A, R, D, I = zip(*self.storage)
         if by == 'td_error':
             candidates = zip(X, A, I, self.td_error, range(len(X)))
@@ -123,7 +123,7 @@ class Replay_buffer():
             top_n = []
             top_n_states = []
             for tup in top_n_candidate:
-                if no_0_dist(tup[0], top_n_states):
+                if no_0_dist(tup[0], top_n_states, tol):
                     top_n.append(tup)
                     top_n_states.append(tup[0])
                     if len(top_n) > top_n_constraints:
@@ -158,21 +158,16 @@ class Replay_buffer():
         return smallest_n
 
 
-
-
-
-
-
-def no_0_dist(state, slist):
+def no_0_dist(state, slist, tol):
     if isinstance(state, torch.Tensor):
         for x in slist:
             d = (state - x).pow(2).sum()
-            if d < 1e-4:
+            if d < tol:
                 return False
     else:
         for x in slist:
             d = np.linalg.norm(np.subtract(state,x))
-            if d < 1e-2:
+            if d < tol:
                 return False
     return True
 

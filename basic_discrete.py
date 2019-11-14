@@ -19,6 +19,12 @@ from collections import OrderedDict, Counter
 import sys
 sys.path.append('./replay')
 
+#vis - mountaincar only
+import matplotlib.patches as mpatches
+from matplotlib.colors import ListedColormap
+import pandas as pd
+import matplotlib.pyplot as plt
+
 
 #GLOBAL VARIABLES
 INIT_WEIGHT = False
@@ -31,7 +37,7 @@ BAD_STATE_VAR = 0.3
 
 # number of trajectories for evaluation
 SAMPLE_TRAJ = 20
-EVAL_TRAJ = 1
+EVAL_TRAJ = 5
 
 def main():
     args = get_args()
@@ -62,22 +68,21 @@ def main():
     elif args.policy == "nn": #assume it's 2 layer here
         device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
         N_SAMPLES = args.n_samples if args.n_samples>0 else int(env.observation_space.shape[0]*2)
-        print(env.observation_space.shape[0])
         LOW_REW_SET = N_SAMPLES*2
         TOP_N_CONSTRIANTS = int(N_SAMPLES*2)
         
         def make_policy():
             return Policy_quad_classification(env.observation_space.shape[0],
                         env.action_space.n, num_hidden=num_hidden).to(device)
-        
+
         def take_action(ind, env=args.env):
-            if env == 'Acrobot-v1' or 'MountainCar-v0':
+            if env == 'Acrobot-v1':
                 acts = [-1, 0 , 1]
                 return acts[int(ind)]
+            elif env == 'MountainCar-v0':
+                return int(ind)
             else:
                 raise NotImplementedError
-
-
 
     print('Using device:', device)
 
@@ -87,6 +92,8 @@ def main():
 
     ep_no_improvement = 0
     iter_steps = args.iter_steps
+
+    max_position = -.4
 
     for i_episode in count(1):
 
@@ -116,6 +123,18 @@ def main():
                 next_state, reward, done, _ = env.step(take_action(ind))
                 if args.render:
                     env.render()
+                # modify reward for mountain car
+                if next_state[0] < -0.5:
+                    reward = -0.5
+                else:
+                    reward = next_state[0]
+                if next_state[0] >= 0.5:
+                    reward += 1
+
+                if next_state[0] > max_position:
+                    max_position = next_state[0]
+                    reward += 10
+
                 explore_rew += reward
 
                 replay_buffer.push((state, next_state, ind, reward, done, (name_str, explore_episodes, t))) 
@@ -134,7 +153,8 @@ def main():
         low_rew_constraints_set = []
 
             
-        best_tuples = replay_buffer.best_state_actions_replace(top_n_constraints=TOP_N_CONSTRIANTS, by='rewards', discard = True)
+        best_tuples = replay_buffer.best_state_actions_replace(top_n_constraints=TOP_N_CONSTRIANTS, 
+                                                                by='rewards', tol=5*1e-2, discard=True)
 
         # sample and solve
         max_policy, max_eval, max_set = sample_policy, sample_eval, best_tuples
@@ -148,11 +168,11 @@ def main():
                 constraints = best_tuples
             else:   
                 constraints = random.sample(best_tuples+low_rew_constraints_set, N_SAMPLES)
+            print(constraints)
             print(all_l2_norm(constraints)[:5])
 
             # Get metadata of constraints
             states, actions, info, rewards, _ = zip(*constraints)
-            print(actions)
             print("ep %d b %d: %d constraints mean: %.3f  std: %.3f  max: %.3f" % ( i_episode, branch, len(constraints), np.mean(rewards), np.std(rewards), max(rewards)))
             
             print(len(info))
@@ -163,8 +183,8 @@ def main():
                 states = torch.tensor(states).float()
             
             actions = torch.tensor(np.array(actions))
-            branch_policy.train(states.to(device), actions.to(device), epoch=args.training_epoch)
-           
+            loss = branch_policy.train(states.to(device), actions.to(device), epoch=args.training_epoch)
+            
             # Evaluate
             eval_rew = 0
             for i in range(EVAL_TRAJ):
@@ -174,10 +194,13 @@ def main():
 
                     ind = sample_policy.select_action(state, VARIANCE)
                     next_state, reward, done, _ = env.step(take_action(ind))
-
-                    next_state, reward, done, _ = env.step(action)
-                    if args.render:
-                        env.render()
+                    if next_state[0] < -0.5:
+                        reward = -0.5
+                    else:
+                        reward = next_state[0]
+                    if next_state[0] >= 0.5:
+                        reward += 1
+                        
                     eval_rew += reward
                     branch_buffer.push((state, next_state, ind, reward, done, ("eval", i, step))) 
                     state = next_state
@@ -188,6 +211,8 @@ def main():
                         break
 
             eval_rew /= EVAL_TRAJ
+            vis(branch_policy, states, actions, loss, eval_rew, "%d-%d"%(i_episode, branch))
+
 
             #log
             print('Episode {}\tBranch: {}\tEval reward: {:.2f}\tExplore reward: {:.2f}'.format(
@@ -233,5 +258,44 @@ def all_l2_norm(constraints):
         print("0 distances: %d" % zerodist)
     return sorted(all_dist)
 
+def vis(policy, states, actions, loss, reward, name):
+    X = np.random.uniform(-1.2, 0.6, 10000)
+    Y = np.random.uniform(-0.07, 0.07, 10000)
+    Z = []
+    for i in range(len(X)):
+        a = policy.select_action(np.array([X[i],Y[i]]))[0]
+        Z.append(a)
+    Z = pd.Series(Z)
+    colors = {0:'blue',1:'lime',2:'red'}
+    colors_ = Z.apply(lambda x:colors[x])
+    labels = ['Left','Right','Nothing']
+    fig = plt.figure(5, figsize=[7,7])
+    ax = fig.gca()
+    plt.set_cmap('brg')
+    surf = ax.scatter(X,Y, c=Z)
+    
+    Z_acts = pd.Series(actions.flatten())
+    _ = Z_acts.apply(lambda x:colors[x])
+    const = ax.scatter(states[:,0],states[:,1], c=Z_acts, s=120, marker="*", edgecolors='black')
+
+    ax.set_xlabel('Position')
+    ax.set_ylabel('Velocity')
+    ax.set_title('Policy - loss = %.3f, reward = %.3f'%(loss,reward))
+    recs = []
+    c = ['blue','lime','red']
+    for i in range(0,3):
+        recs.append(mpatches.Rectangle((0,0),1,1,fc=c[i]))
+    plt.legend(recs,labels,loc=4,ncol=3)
+    fig.savefig('vis/'+name)
+
+
+'''
+if next_state[0] < -0.5:
+    reward = 0
+else:
+    reward = next_state[0] + 0.5
+if next_state[0] >= 0.5:
+    reward += 1
+'''
 if __name__ == '__main__':
     main()

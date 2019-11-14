@@ -87,10 +87,10 @@ class Policy_quad_norm(nn.Module):
                 print("Policy trianing: epoch %d, loss = %.3f" %(e, loss.item()))
             if torch.abs(prev_loss-loss) < tol:
                 print("converged: epoch %d, loss = %.3f" %(e, loss.item()))
-                return
+                return 
             elif e == epoch-1:
                 print("max iter: epoch %d, loss = %.3f" %(e, loss.item()))
-                return
+                return 
         prev_loss = loss
 
     def clean(self):
